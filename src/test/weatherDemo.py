@@ -5,10 +5,11 @@ root with::
 
     python3 src/test/weatherDemo.py
 
-The resulting ``weather_simulation.gif`` contains the initial frame and sixty
-one-minute updates.  The high-resolution local window is outlined in green
-and rendered over the low-resolution global layer.  ``H`` and ``F`` mark the
-stationary helicopter and frigate cells respectively.
+The resulting ``build/weatherSimu/weather_simulation.gif`` contains the
+initial frame and sixty one-minute updates with the supplied default config.
+The high-resolution local window is outlined in green and rendered over the
+low-resolution global layer.  ``H`` and ``F`` mark the stationary helicopter
+and frigate cells respectively.
 """
 
 from __future__ import annotations
@@ -26,10 +27,15 @@ if str(SRC_DIR) not in sys.path:
 
 from model.weatherMap import THUNDERSTORM, WeatherMapSnapshot  # noqa: E402
 from model.weatherSystem import (  # noqa: E402
+    DEFAULT_CONFIG_PATH,
     SimulationParameters,
     WeatherFrame,
     WeatherSystem,
 )
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_OUTPUT_PATH = REPOSITORY_ROOT / "build" / "weatherSimu" / "weather_simulation.gif"
 
 
 _PALETTE = (
@@ -334,6 +340,7 @@ def _write_animated_gif(
     *,
     frame_duration_ms: int,
 ) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
     iterator = iter(frames)
     first_width, first_height, first_pixels = next(iterator)
     all_frames = [(first_width, first_height, first_pixels), *iterator]
@@ -363,13 +370,14 @@ def _write_animated_gif(
 
 
 def create_weather_animation(
-    output_path: str | Path = "weather_simulation.gif",
+    output_path: str | Path = DEFAULT_OUTPUT_PATH,
     *,
     parameters: SimulationParameters | None = None,
+    config_path: str | Path = DEFAULT_CONFIG_PATH,
     frame_duration_ms: int = 160,
 ) -> Path:
     """Run a simulation and save all frames as a looping animated GIF."""
-    configuration = parameters or SimulationParameters()
+    configuration = parameters or SimulationParameters.from_json(config_path)
     system = WeatherSystem(configuration)
     output = Path(output_path).expanduser().resolve()
     rendered_frames = (
@@ -391,8 +399,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
-        default="weather_simulation.gif",
-        help="output GIF path (default: weather_simulation.gif)",
+        default=str(DEFAULT_OUTPUT_PATH),
+        help=f"output GIF path (default: {DEFAULT_OUTPUT_PATH})",
+    )
+    parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG_PATH),
+        help=f"weather JSON path (default: {DEFAULT_CONFIG_PATH})",
     )
     parser.add_argument(
         "--frame-ms",
@@ -401,8 +414,12 @@ def main() -> None:
         help="display duration of each simulation frame in milliseconds",
     )
     arguments = parser.parse_args()
-    output = create_weather_animation(arguments.output, frame_duration_ms=arguments.frame_ms)
-    print(f"Created {output} with the default 60-minute simulation.")
+    output = create_weather_animation(
+        arguments.output,
+        config_path=arguments.config,
+        frame_duration_ms=arguments.frame_ms,
+    )
+    print(f"Created {output} using {Path(arguments.config).resolve()}.")
 
 
 if __name__ == "__main__":

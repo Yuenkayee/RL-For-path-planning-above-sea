@@ -27,15 +27,39 @@ No physical claim beyond this scenario-level abstraction is intended.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
+import json
 import math
+from pathlib import Path
 import random
-from typing import Iterator
+from typing import Any, Iterator, Mapping
 
 try:  # Package import: ``from model.weatherSystem import WeatherSystem``.
     from .weatherMap import FREE, THUNDERSTORM, WeatherMap, WeatherMapSnapshot
 except ImportError:  # Direct execution from the ``src/model`` directory.
     from weatherMap import FREE, THUNDERSTORM, WeatherMap, WeatherMapSnapshot
+
+
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "weatherConfig.json"
+
+
+def _reject_unknown_fields(
+    data: Mapping[str, Any], dataclass_type: type, section_name: str
+) -> None:
+    allowed = {item.name for item in fields(dataclass_type)}
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        raise ValueError(
+            f"unknown field(s) in {section_name}: {', '.join(unknown)}"
+        )
+
+
+def _as_pair(value: Any, name: str) -> tuple[float, float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError(f"{name} must be a JSON array containing two numbers")
+    if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in value):
+        raise ValueError(f"{name} must contain only numbers")
+    return float(value[0]), float(value[1])
 
 
 @dataclass(frozen=True)
@@ -62,6 +86,7 @@ class WeatherParameters:
     cell_lifetime_minutes_range: tuple[float, float] = (30.0, 60.0)
     new_cell_interval_minutes_range: tuple[float, float] = (8.0, 15.0)
     shape_irregularity: float = 0.18
+    storm_area_scale: float = 1.0
 
     def __post_init__(self) -> None:
         if self.sea_state_code < 0 or self.sea_state_code > 9:
@@ -114,6 +139,8 @@ class WeatherParameters:
             raise ValueError("new-cell intervals must be strictly positive")
         if not 0 <= self.shape_irregularity < 0.5:
             raise ValueError("shape_irregularity must be in [0, 0.5)")
+        if not math.isfinite(self.storm_area_scale) or self.storm_area_scale <= 0:
+            raise ValueError("storm_area_scale must be positive and finite")
 
     @staticmethod
     def _validate_range(
@@ -125,6 +152,27 @@ class WeatherParameters:
             raise ValueError(f"{name} must be an ordered range above {minimum}")
         if value[0] == value[1] == minimum:
             raise ValueError(f"{name} cannot be entirely zero")
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "WeatherParameters":
+        """Build weather parameters from the ``weather`` JSON object."""
+        if not isinstance(data, Mapping):
+            raise ValueError("weather must be a JSON object")
+        _reject_unknown_fields(data, cls, "weather")
+        values = dict(data)
+        for name in (
+            "significant_wave_height_range_m",
+            "cell_radius_nm_range",
+            "cell_aspect_ratio_range",
+            "cell_lifetime_minutes_range",
+            "new_cell_interval_minutes_range",
+        ):
+            if name in values:
+                values[name] = _as_pair(values[name], f"weather.{name}")
+        try:
+            return cls(**values)
+        except TypeError as error:
+            raise ValueError(f"invalid weather configuration: {error}") from error
 
 
 @dataclass(frozen=True)
@@ -200,6 +248,48 @@ class SimulationParameters:
     def step_count(self) -> int:
         return round(self.total_time_minutes / self.time_step_minutes)
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "SimulationParameters":
+        """Build and validate all simulation parameters from parsed JSON."""
+        if not isinstance(data, Mapping):
+            raise ValueError("weather configuration root must be a JSON object")
+        _reject_unknown_fields(data, cls, "configuration root")
+        values = dict(data)
+        for name in (
+            "map_size_nm",
+            "local_size_nm",
+            "helicopter_initial_nm",
+            "frigate_initial_nm",
+        ):
+            if name in values:
+                values[name] = _as_pair(values[name], name)
+        if "local_origin_nm" in values and values["local_origin_nm"] is not None:
+            values["local_origin_nm"] = _as_pair(
+                values["local_origin_nm"], "local_origin_nm"
+            )
+        if "weather" in values:
+            values["weather"] = WeatherParameters.from_dict(values["weather"])
+        try:
+            return cls(**values)
+        except TypeError as error:
+            raise ValueError(f"invalid simulation configuration: {error}") from error
+
+    @classmethod
+    def from_json(
+        cls, path: str | Path = DEFAULT_CONFIG_PATH
+    ) -> "SimulationParameters":
+        """Load UTF-8 JSON configuration and validate every field."""
+        config_path = Path(path).expanduser().resolve()
+        try:
+            with config_path.open("r", encoding="utf-8") as config_file:
+                data = json.load(config_file)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"invalid JSON in {config_path}: line {error.lineno}, "
+                f"column {error.colno}: {error.msg}"
+            ) from error
+        return cls.from_dict(data)
+
 
 @dataclass
 class StormCell:
@@ -255,8 +345,19 @@ class WeatherFrame:
 class WeatherSystem:
     """Generate and advance a binary thunderstorm occupancy simulation."""
 
-    def __init__(self, parameters: SimulationParameters | None = None) -> None:
-        self.parameters = parameters or SimulationParameters()
+    def __init__(
+        self,
+        parameters: SimulationParameters | None = None,
+        *,
+        config_path: str | Path | None = None,
+    ) -> None:
+        if parameters is not None and config_path is not None:
+            raise ValueError("pass either parameters or config_path, not both")
+        if parameters is not None:
+            self.parameters = parameters
+        else:
+            selected_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
+            self.parameters = SimulationParameters.from_json(selected_path)
         self._rng = random.Random(self.parameters.random_seed)
         self._next_identifier = 1
         self._cells: list[StormCell] = []
@@ -320,7 +421,11 @@ class WeatherSystem:
         clearance = self.parameters.global_resolution_nm * math.sqrt(2.0)
 
         for _ in range(500):
-            radius = self._rng.uniform(minimum_radius, maximum_radius)
+            # storm_area_scale is defined as an area multiplier.  Scaling both
+            # ellipse axes by sqrt(scale) multiplies their area by ``scale``.
+            radius = self._rng.uniform(minimum_radius, maximum_radius) * math.sqrt(
+                weather.storm_area_scale
+            )
             aspect = self._rng.uniform(*weather.cell_aspect_ratio_range)
             center_x = self._rng.uniform(0.0, map_width)
             center_y = self._rng.uniform(0.0, map_height)
@@ -509,6 +614,7 @@ class WeatherSystem:
 
 
 __all__ = [
+    "DEFAULT_CONFIG_PATH",
     "SimulationParameters",
     "StormCell",
     "WeatherFrame",
