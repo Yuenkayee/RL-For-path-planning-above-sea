@@ -40,7 +40,8 @@ except ImportError:  # Direct execution from the ``src/model`` directory.
     from weatherMap import FREE, THUNDERSTORM, WeatherMap, WeatherMapSnapshot
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "weatherConfig.json"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG_PATH = REPOSITORY_ROOT / "config" / "weatherConfig.json"
 
 
 def _reject_unknown_fields(
@@ -596,6 +597,39 @@ class WeatherSystem:
         self.weather_map.update(
             global_values=global_values,
             local_values=local_values,
+        )
+
+    def move_local_window(
+        self,
+        center_nm: tuple[float, float],
+        *,
+        size_nm: tuple[float, float] | None = None,
+    ) -> None:
+        """Center the high-resolution window on a world point and rerasterize it.
+
+        The origin is clamped so the complete local window remains inside the
+        global map. The existing ``WeatherMap`` and ``local_grid`` objects are
+        mutated in place, preserving references held by environments/planners.
+        """
+        local_size = size_nm or self.weather_map.local_size_nm
+        map_width, map_height = self.weather_map.area_size_nm
+        local_width, local_height = local_size
+        center_x, center_y = center_nm
+        origin = (
+            min(max(0.0, center_x - local_width / 2.0), map_width - local_width),
+            min(max(0.0, center_y - local_height / 2.0), map_height - local_height),
+        )
+        local_width_cells = round(local_width / self.weather_map.local_resolution_nm)
+        local_height_cells = round(local_height / self.weather_map.local_resolution_nm)
+        local_values = self._rasterize(
+            origin_nm=origin,
+            resolution_nm=self.weather_map.local_resolution_nm,
+            shape=(local_height_cells, local_width_cells),
+        )
+        self.weather_map.move_local_window(
+            origin,
+            values=local_values,
+            size_nm=local_size,
         )
 
     def current_frame(self) -> WeatherFrame:

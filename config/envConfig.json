@@ -1,0 +1,21 @@
+{
+  "control_step_seconds": 6.0,
+  "weather_step_seconds": 60.0,
+  "maximum_episode_minutes": 120.0,
+  "heading_count": 16,
+  "helicopter_speed_knots": [0.0, 50.0],
+  "frigate_speed_knots": 30.0,
+  "frigate_heading_deg": 225.0,
+  "success_grid_resolution_nm": 0.1,
+  "storm_safety_margin_nm": 0.1,
+  "weather_history_frames": 6,
+  "reward": {
+    "success": 200.0,
+    "storm_collision": -200.0,
+    "out_of_bounds": -150.0,
+    "timeout": -100.0,
+    "step": -0.02,
+    "wait": -0.01,
+    "speed_switch": -0.005
+  }
+}

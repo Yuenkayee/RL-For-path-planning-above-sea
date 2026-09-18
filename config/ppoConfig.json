@@ -1,0 +1,12 @@
+{
+  "algorithm": "masked_ppo",
+  "learning_rate": 0.0003,
+  "discount_factor": 0.99,
+  "gae_lambda": 0.95,
+  "clip_range": 0.2,
+  "entropy_coefficient": 0.01,
+  "value_coefficient": 0.5,
+  "rollout_steps": 2048,
+  "batch_size": 64,
+  "update_epochs": 10
+}

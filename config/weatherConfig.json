@@ -24,6 +24,6 @@
     "cell_lifetime_minutes_range": [30.0, 60.0],
     "new_cell_interval_minutes_range": [8.0, 15.0],
     "shape_irregularity": 0.18,
-    "storm_area_scale": 2.0
+    "storm_area_scale": 1.0
   }
 }
