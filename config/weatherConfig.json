@@ -1,5 +1,5 @@
 {
-  "map_size_nm": [50.0, 50.0],
+  "map_size_nm": [80.0, 80.0],
   "global_resolution_nm": 1.0,
   "local_resolution_nm": 0.1,
   "local_size_nm": [10.0, 10.0],
@@ -17,13 +17,14 @@
     "storm_motion_direction_deg": 135.0,
     "motion_speed_jitter_fraction": 0.08,
     "motion_direction_jitter_deg": 3.0,
-    "initial_storm_count": 5,
-    "maximum_storm_count": 8,
+    "initial_storm_count": 8,
+    "maximum_storm_count": 12,
     "cell_radius_nm_range": [2.0, 5.0],
     "cell_aspect_ratio_range": [0.5, 0.9],
     "cell_lifetime_minutes_range": [30.0, 60.0],
     "new_cell_interval_minutes_range": [8.0, 15.0],
     "shape_irregularity": 0.18,
-    "storm_area_scale": 1.0
+    "storm_area_scale": 1.0,
+    "storm_area_scale_range": [1.0, 1.5]
   }
 }

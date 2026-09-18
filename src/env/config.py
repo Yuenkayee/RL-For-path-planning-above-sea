@@ -21,9 +21,9 @@ class EnvironmentConfig:
     weather_step_seconds: float = 60.0
     maximum_episode_minutes: float = 120.0
     heading_count: int = 16
-    helicopter_speed_knots: tuple[float, float] = (0.0, 50.0)
+    helicopter_speed_knots: tuple[float, float] = (0.0, 100.0)
     frigate_speed_knots: float = 30.0
-    frigate_heading_deg: float = 225.0
+    frigate_heading_choices_deg: tuple[float, ...] = (315.0, 0.0, 45.0, 90.0, 135.0)
     success_grid_resolution_nm: float = 0.1
     storm_safety_margin_nm: float = 0.1
     weather_history_frames: int = 6
@@ -45,6 +45,13 @@ class EnvironmentConfig:
             raise ValueError("helicopter_speed_knots must contain wait and cruise speeds")
         if self.helicopter_speed_knots[0] < 0 or self.helicopter_speed_knots[1] <= 0:
             raise ValueError("invalid helicopter speed modes")
+        if not self.frigate_heading_choices_deg:
+            raise ValueError("frigate_heading_choices_deg cannot be empty")
+        if any(
+            not math.isfinite(heading) or not 0.0 <= heading < 360.0
+            for heading in self.frigate_heading_choices_deg
+        ):
+            raise ValueError("frigate headings must be finite values in [0, 360)")
         ratio = self.weather_step_seconds / self.control_step_seconds
         if not math.isclose(ratio, round(ratio), abs_tol=1e-9):
             raise ValueError("weather step must be an integer multiple of control step")
@@ -71,6 +78,11 @@ class EnvironmentConfig:
             if not isinstance(speeds, (list, tuple)) or len(speeds) != 2:
                 raise ValueError("helicopter_speed_knots must contain two values")
             data["helicopter_speed_knots"] = (float(speeds[0]), float(speeds[1]))
+        if "frigate_heading_choices_deg" in data:
+            headings = data["frigate_heading_choices_deg"]
+            if not isinstance(headings, (list, tuple)) or not headings:
+                raise ValueError("frigate_heading_choices_deg must contain at least one value")
+            data["frigate_heading_choices_deg"] = tuple(float(item) for item in headings)
         if "reward" in data:
             data["reward"] = RewardWeights.from_mapping(data["reward"])
         return cls(**data)

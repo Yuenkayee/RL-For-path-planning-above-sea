@@ -36,7 +36,7 @@ def _easy_environment() -> ReturnEnv:
     return ReturnEnv(
         EnvironmentConfig(
             maximum_episode_minutes=2.0,
-            frigate_heading_deg=0.0,
+            frigate_heading_choices_deg=(0.0,),
             weather_history_frames=2,
         ),
         weather_parameters=parameters,

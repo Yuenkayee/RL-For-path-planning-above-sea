@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 from collections import deque
 from dataclasses import replace
 from pathlib import Path
@@ -117,6 +118,14 @@ class ReturnEnv(gym.Env):
         del options
         super().reset(seed=seed)
         parameters = self._base_weather_parameters
+        episode_seed = seed if seed is not None else parameters.random_seed
+        episode_rng = random.Random(episode_seed)
+        frigate_heading_deg = episode_rng.choice(self.config.frigate_heading_choices_deg)
+        storm_area_scale = episode_rng.uniform(*parameters.weather.storm_area_scale_range)
+        parameters = replace(
+            parameters,
+            weather=replace(parameters.weather, storm_area_scale=storm_area_scale),
+        )
         if seed is not None:
             parameters = replace(parameters, random_seed=seed)
         self.weather_system = WeatherSystem(parameters)
@@ -128,7 +137,7 @@ class ReturnEnv(gym.Env):
         self.frigate = Frigate(
             *parameters.frigate_initial_nm,
             speed_knots=self.config.frigate_speed_knots,
-            heading_deg=self.config.frigate_heading_deg,
+            heading_deg=frigate_heading_deg,
         )
         self.elapsed_seconds = 0.0
         self._weather_elapsed_seconds = 0.0
@@ -139,7 +148,13 @@ class ReturnEnv(gym.Env):
         for _ in range(self.config.weather_history_frames):
             self._history.append(snapshot)
         self._refresh_guidance()
-        return self._observation(), {"seed": parameters.random_seed}
+        return self._observation(), {
+            "seed": parameters.random_seed,
+            "episode_config": {
+                "frigate_heading_deg": frigate_heading_deg,
+                "storm_area_scale": storm_area_scale,
+            },
+        }
 
     def _refresh_guidance(self) -> None:
         snapshot = self.weather_map.snapshot()
@@ -200,6 +215,7 @@ class ReturnEnv(gym.Env):
             frigate_nm=(self.frigate.x_nm, self.frigate.y_nm),
             helicopter_heading_deg=self.helicopter.heading_deg,
             helicopter_speed_knots=self.helicopter.speed_knots,
+            helicopter_cruise_speed_knots=self.config.flight_speed_knots,
             frigate_velocity_nm_per_hour=frigate_velocity,
             elapsed_seconds=self.elapsed_seconds,
             maximum_seconds=self.config.maximum_episode_minutes * 60.0,

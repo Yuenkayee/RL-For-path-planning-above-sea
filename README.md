@@ -63,4 +63,10 @@ uv run ruff check .
 
 首次使用前执行 `uv sync --all-groups --frozen`。依赖声明位于 `pyproject.toml`，完整传递依赖由 `uv.lock` 锁定，详细说明见 [requirements.md](requirements.md)。
 
+Ubuntu 22.04训练服务器可运行：
+
+```bash
+./shell/check_training_server.sh --require-cuda
+```
+
 依赖与建议安装方式见 [requirements.md](requirements.md)。

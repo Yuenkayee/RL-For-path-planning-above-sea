@@ -31,6 +31,20 @@ def clear_weather_parameters(**changes):
 
 
 class WeatherAndEnvironmentTests(unittest.TestCase):
+    def test_default_training_scenario_configuration(self) -> None:
+        env_config = EnvironmentConfig.from_json()
+        weather_parameters = SimulationParameters.from_json()
+
+        self.assertEqual(env_config.helicopter_speed_knots, (0.0, 100.0))
+        self.assertEqual(
+            env_config.frigate_heading_choices_deg,
+            (315.0, 0.0, 45.0, 90.0, 135.0),
+        )
+        self.assertEqual(weather_parameters.map_size_nm, (80.0, 80.0))
+        self.assertEqual(weather_parameters.weather.initial_storm_count, 8)
+        self.assertEqual(weather_parameters.weather.maximum_storm_count, 12)
+        self.assertEqual(weather_parameters.weather.storm_area_scale_range, (1.0, 1.5))
+
     def test_local_grid_reference_survives_window_move(self) -> None:
         system = WeatherSystem(clear_weather_parameters())
         local_grid = system.weather_map.local_grid
@@ -54,7 +68,7 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
     def test_wait_can_complete_rendezvous(self) -> None:
         config = EnvironmentConfig(
             maximum_episode_minutes=5.0,
-            frigate_heading_deg=0.0,
+            frigate_heading_choices_deg=(0.0,),
             weather_history_frames=2,
         )
         env = ReturnEnv(config, weather_parameters=clear_weather_parameters())
@@ -79,6 +93,33 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
             self.assertFalse(terminated or truncated)
             updates.append(info["weather_updated"])
         self.assertEqual(updates, [False] * 9 + [True])
+
+    def test_episode_configuration_is_seeded_and_randomized(self) -> None:
+        parameters = clear_weather_parameters(frigate_initial_nm=(20.0, 20.0))
+        config = EnvironmentConfig(
+            frigate_heading_choices_deg=(315.0, 0.0, 45.0, 90.0, 135.0),
+        )
+        env = ReturnEnv(config, weather_parameters=parameters)
+
+        _, first = env.reset(seed=17)
+        _, repeated = env.reset(seed=17)
+        _, different = env.reset(seed=18)
+
+        self.assertEqual(first["episode_config"], repeated["episode_config"])
+        self.assertIn(
+            first["episode_config"]["frigate_heading_deg"],
+            config.frigate_heading_choices_deg,
+        )
+        self.assertGreaterEqual(first["episode_config"]["storm_area_scale"], 1.0)
+        self.assertLessEqual(first["episode_config"]["storm_area_scale"], 1.5)
+        self.assertNotEqual(
+            first["episode_config"]["storm_area_scale"],
+            different["episode_config"]["storm_area_scale"],
+        )
+        self.assertEqual(
+            env.weather_system.parameters.weather.storm_area_scale,
+            different["episode_config"]["storm_area_scale"],
+        )
 
 
 if __name__ == "__main__":

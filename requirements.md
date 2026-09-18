@@ -29,6 +29,18 @@
 uv sync --all-groups --frozen
 ```
 
+Ubuntu 22.04训练服务器可以直接运行预检脚本。脚本会检查并安装缺失的uv、Python 3.11和锁定依赖：
+
+```bash
+./shell/check_training_server.sh
+```
+
+若服务器必须使用NVIDIA GPU训练：
+
+```bash
+./shell/check_training_server.sh --require-cuda
+```
+
 `--frozen`确保安装严格使用现有锁文件，不在本地隐式更新版本。更新依赖时修改 `pyproject.toml`，然后执行：
 
 ```bash

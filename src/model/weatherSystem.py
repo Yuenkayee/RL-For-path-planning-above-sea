@@ -79,14 +79,15 @@ class WeatherParameters:
     motion_speed_jitter_fraction: float = 0.08
     motion_direction_jitter_deg: float = 3.0
 
-    initial_storm_count: int = 3
-    maximum_storm_count: int = 8
+    initial_storm_count: int = 8
+    maximum_storm_count: int = 12
     cell_radius_nm_range: tuple[float, float] = (2.0, 5.0)
     cell_aspect_ratio_range: tuple[float, float] = (0.50, 0.90)
     cell_lifetime_minutes_range: tuple[float, float] = (30.0, 60.0)
     new_cell_interval_minutes_range: tuple[float, float] = (8.0, 15.0)
     shape_irregularity: float = 0.18
     storm_area_scale: float = 1.0
+    storm_area_scale_range: tuple[float, float] = (1.0, 1.5)
 
     def __post_init__(self) -> None:
         if self.sea_state_code < 0 or self.sea_state_code > 9:
@@ -137,6 +138,9 @@ class WeatherParameters:
             raise ValueError("shape_irregularity must be in [0, 0.5)")
         if not math.isfinite(self.storm_area_scale) or self.storm_area_scale <= 0:
             raise ValueError("storm_area_scale must be positive and finite")
+        self._validate_range(self.storm_area_scale_range, "storm_area_scale_range", 0.0)
+        if self.storm_area_scale_range[0] <= 0:
+            raise ValueError("storm_area_scale_range values must be strictly positive")
 
     @staticmethod
     def _validate_range(value: tuple[float, float], name: str, minimum: float) -> None:
@@ -160,6 +164,7 @@ class WeatherParameters:
             "cell_aspect_ratio_range",
             "cell_lifetime_minutes_range",
             "new_cell_interval_minutes_range",
+            "storm_area_scale_range",
         ):
             if name in values:
                 values[name] = _as_pair(values[name], f"weather.{name}")
@@ -173,7 +178,7 @@ class WeatherParameters:
 class SimulationParameters:
     """Complete configuration for a weather simulation run."""
 
-    map_size_nm: tuple[float, float] = (50.0, 50.0)
+    map_size_nm: tuple[float, float] = (80.0, 80.0)
     global_resolution_nm: float = 1.0
     local_resolution_nm: float = 0.1
     local_size_nm: tuple[float, float] = (10.0, 10.0)
