@@ -29,17 +29,23 @@
 uv sync --all-groups --frozen
 ```
 
-Ubuntu 22.04训练服务器可以直接运行预检脚本。脚本会检查并安装缺失的uv、Python 3.11和锁定依赖：
+Ubuntu 22.04训练服务器可以直接运行预检脚本。脚本使用服务器上已有的
+Python 3.11–3.13 和它对应的 `pip`，按 `pyproject.toml` 补齐不兼容或缺失的依赖。
+它不安装 `uv` 或 Python，也不创建 `.venv`：
 
 ```bash
-./shell/check_training_server.sh
+./shell/check_training_server.sh --python /path/to/python3.11
 ```
 
 若服务器必须使用NVIDIA GPU训练：
 
 ```bash
-./shell/check_training_server.sh --require-cuda
+./shell/check_training_server.sh --python /path/to/python3.11 --require-cuda
 ```
+
+已激活 Conda 或其他环境时，可使用 `--python "$(command -v python)"`。如果只想检查
+而不改动环境，添加 `--check-only`；如果需要安装到当前用户的 site-packages，添加 `--user`。
+不使用 `uv.lock` 意味着只保证直接依赖满足声明的版本范围，而不是复现锁文件中的完全一致环境。
 
 `--frozen`确保安装严格使用现有锁文件，不在本地隐式更新版本。更新依赖时修改 `pyproject.toml`，然后执行：
 

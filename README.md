@@ -63,16 +63,20 @@ uv run ruff check .
 
 首次使用前执行 `uv sync --all-groups --frozen`。依赖声明位于 `pyproject.toml`，完整传递依赖由 `uv.lock` 锁定，详细说明见 [requirements.md](requirements.md)。
 
-Ubuntu 22.04训练服务器可运行：
+Ubuntu 22.04训练服务器可以直接配置已有的 Python 3.11–3.13 环境；该脚本使用
+所选 Python 的 `pip`，不安装 `uv`、不安装 Python，也不创建 `.venv`：
 
 ```bash
-./shell/check_training_server.sh --require-cuda
+./shell/check_training_server.sh --python /path/to/python3.11 --require-cuda
 ```
+
+若已激活 Conda 或其他环境，可执行
+`./shell/check_training_server.sh --python "$(command -v python)" --require-cuda`。仅检查而不安装任何内容时加 `--check-only`。
 
 PPO默认并行运行4个环境，自动选择CUDA、Apple MPS或CPU，并每100步输出各episode进度：
 
 ```bash
-uv run python scripts/train_ppo.py --episodes 1000 --max-steps 1200 --num-envs 8 --device auto
+python scripts/train_ppo.py --episodes 1000 --max-steps 1200 --num-envs 8 --device auto
 ```
 
 依赖与建议安装方式见 [requirements.md](requirements.md)。
