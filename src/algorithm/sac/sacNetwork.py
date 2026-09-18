@@ -1,47 +1,53 @@
-"""Linear actor and twin critics for dependency-free discrete SAC."""
+"""PyTorch actor and twin critics for discrete SAC."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-import random
+import torch
+from torch import Tensor, nn
 
-from algorithm.common.mathUtils import dot, masked_softmax
+from algorithm.common.featureExtractor import DualResolutionFeatureExtractor
 
 
-class SACNetwork:
-    def __init__(self, feature_count: int, action_count: int, *, seed: int | None = None) -> None:
-        rng = random.Random(seed)
-        self.feature_count = feature_count
+class SACNetwork(nn.Module):
+    def __init__(self, history_frames: int, action_count: int) -> None:
+        super().__init__()
+        self.history_frames = history_frames
         self.action_count = action_count
-        self.actor_weights = [
-            [rng.uniform(-0.01, 0.01) for _ in range(feature_count)]
-            for _ in range(action_count)
-        ]
-        self.q1_weights = [[0.0] * feature_count for _ in range(action_count)]
-        self.q2_weights = [[0.0] * feature_count for _ in range(action_count)]
+        self.actor_extractor = DualResolutionFeatureExtractor(history_frames)
+        self.critic_extractor = DualResolutionFeatureExtractor(history_frames)
+        self.actor_head = nn.Sequential(
+            nn.Linear(self.actor_extractor.output_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_count),
+        )
+        self.q1_head = nn.Sequential(
+            nn.Linear(self.critic_extractor.output_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_count),
+        )
+        self.q2_head = nn.Sequential(
+            nn.Linear(self.critic_extractor.output_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_count),
+        )
 
-    def probabilities(self, features: Sequence[float], mask: Sequence[bool]) -> tuple[float, ...]:
-        logits = [dot(row, features) for row in self.actor_weights]
-        return masked_softmax(logits, mask)
+    def actor_logits(self, observation: dict[str, Tensor]) -> Tensor:
+        logits = self.actor_head(self.actor_extractor(observation))
+        return logits.masked_fill(~observation["action_mask"], torch.finfo(logits.dtype).min)
 
-    def q_values(self, features: Sequence[float], critic: int) -> tuple[float, ...]:
-        weights = self.q1_weights if critic == 1 else self.q2_weights
-        return tuple(dot(row, features) for row in weights)
+    def critics(self, observation: dict[str, Tensor]) -> tuple[Tensor, Tensor]:
+        features = self.critic_extractor(observation)
+        return self.q1_head(features), self.q2_head(features)
 
-    def state_dict(self) -> dict:
-        return {
-            "feature_count": self.feature_count,
-            "action_count": self.action_count,
-            "actor_weights": self.actor_weights,
-            "q1_weights": self.q1_weights,
-            "q2_weights": self.q2_weights,
-        }
+    def actor_parameters(self):
+        return list(self.actor_extractor.parameters()) + list(self.actor_head.parameters())
 
-    def load_state_dict(self, state: dict) -> None:
-        if state["feature_count"] != self.feature_count or state["action_count"] != self.action_count:
-            raise ValueError("checkpoint network dimensions do not match")
-        for name in ("actor_weights", "q1_weights", "q2_weights"):
-            setattr(self, name, [list(map(float, row)) for row in state[name]])
+    def critic_parameters(self):
+        return (
+            list(self.critic_extractor.parameters())
+            + list(self.q1_head.parameters())
+            + list(self.q2_head.parameters())
+        )
 
 
 __all__ = ["SACNetwork"]

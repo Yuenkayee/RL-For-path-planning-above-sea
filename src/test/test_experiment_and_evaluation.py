@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
@@ -12,7 +13,7 @@ from env.returnEnv import ReturnEnv
 from experiment import EXPERIMENT_GROUPS
 from model.weatherSystem import SimulationParameters, WeatherParameters
 from training.curriculum import DEFAULT_CURRICULUM, stage_for_progress
-from training.evaluator import evaluate_policy
+from training.evaluator import evaluate_policy, save_evaluation_plot
 
 
 class _WaitPolicy:
@@ -56,6 +57,9 @@ class ExperimentAndEvaluationTests(unittest.TestCase):
         result = evaluate_policy(_easy_environment, _WaitPolicy(), seeds=(1, 2))
         self.assertEqual(result.successes, 2)
         self.assertEqual(result.success_rate, 1.0)
+        with tempfile.TemporaryDirectory() as directory:
+            output = save_evaluation_plot({"wait": result}, Path(directory) / "result.png")
+            self.assertGreater(output.stat().st_size, 0)
 
 
 if __name__ == "__main__":

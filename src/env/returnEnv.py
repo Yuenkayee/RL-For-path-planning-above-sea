@@ -1,12 +1,16 @@
-"""Dependency-free Gymnasium-style helicopter return environment."""
+"""Gymnasium helicopter return environment with NumPy observations."""
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import replace
-import math
 from pathlib import Path
 from typing import Any
+
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
 
 from model.frigate import Frigate
 from model.helicopter import Helicopter
@@ -21,7 +25,7 @@ from .reward import calculate_reward
 from .termination import inside_map, successful_rendezvous
 
 
-class ReturnEnv:
+class ReturnEnv(gym.Env):
     """Coordinate weather, vehicles, rewards and terminal conditions.
 
     The public ``reset`` and ``step`` signatures match Gymnasium closely, but
@@ -44,6 +48,45 @@ class ReturnEnv:
             weather_config_path
         )
         self.action_count = self.config.action_count
+        self.action_space = spaces.Discrete(self.action_count)
+        global_height = round(
+            self._base_weather_parameters.map_size_nm[1]
+            / self._base_weather_parameters.global_resolution_nm
+        )
+        global_width = round(
+            self._base_weather_parameters.map_size_nm[0]
+            / self._base_weather_parameters.global_resolution_nm
+        )
+        local_height = round(
+            self._base_weather_parameters.local_size_nm[1]
+            / self._base_weather_parameters.local_resolution_nm
+        )
+        local_width = round(
+            self._base_weather_parameters.local_size_nm[0]
+            / self._base_weather_parameters.local_resolution_nm
+        )
+        self.observation_space = spaces.Dict(
+            {
+                "global_weather": spaces.Box(
+                    0,
+                    1,
+                    shape=(self.config.weather_history_frames, global_height, global_width),
+                    dtype=np.uint8,
+                ),
+                "local_weather": spaces.Box(
+                    0,
+                    1,
+                    shape=(self.config.weather_history_frames, local_height, local_width),
+                    dtype=np.uint8,
+                ),
+                "kinematics": spaces.Box(-2.0, 2.0, shape=(11,), dtype=np.float32),
+                "action_mask": spaces.MultiBinary(self.action_count),
+                "guidance_global": spaces.Box(
+                    0.0, 1.0, shape=(global_height, global_width), dtype=np.float32
+                ),
+                "guidance_vector": spaces.Box(-1.5, 1.5, shape=(6,), dtype=np.float32),
+            }
+        )
         self.weather_system: WeatherSystem
         self.helicopter: Helicopter
         self.frigate: Frigate
@@ -72,6 +115,7 @@ class ReturnEnv:
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         del options
+        super().reset(seed=seed)
         parameters = self._base_weather_parameters
         if seed is not None:
             parameters = replace(parameters, random_seed=seed)
@@ -164,13 +208,12 @@ class ReturnEnv:
             guidance_vector=guidance_vector,
         )
 
-    def step(
-        self, action: int
-    ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
+    def step(self, action: int) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
         if self._done:
             raise RuntimeError("episode is done; call reset before step")
-        if isinstance(action, bool) or not isinstance(action, int):
+        if isinstance(action, bool) or not isinstance(action, (int, np.integer)):
             raise TypeError("action must be an integer")
+        action = int(action)
         if not 0 <= action < self.action_count:
             raise ValueError(f"action must be in [0, {self.action_count - 1}]")
 
@@ -226,8 +269,10 @@ class ReturnEnv:
         if not terminated and self.elapsed_seconds + 1e-9 >= maximum_seconds:
             outcome = "timeout"
             truncated = True
-        if not terminated and not truncated and not inside_map(
-            frigate_end, self.weather_map.area_size_nm
+        if (
+            not terminated
+            and not truncated
+            and not inside_map(frigate_end, self.weather_map.area_size_nm)
         ):
             outcome = "timeout"
             truncated = True

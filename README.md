@@ -27,9 +27,10 @@
 - 6秒控制步与60秒天气步的统一返场环境；
 - 等待加16航向动作、扫掠碰撞检测、动作掩码和0.1海里进场判定；
 - 截获预测、引导图、SIPP和时空A*；
-- 可训练的Masked PPO、Dueling Double DQN和离散SAC；
-- 课程学习定义、JSON检查点、确定性推理和统一评估入口；
-- 不依赖第三方包的自动化测试。
+- 基于PyTorch双分辨率CNN的Masked PPO、Dueling Double DQN和离散SAC；
+- Gymnasium标准动作空间、观测空间和环境接口；
+- 课程学习、PyTorch检查点、TensorBoard日志、确定性推理和统一评估；
+- NumPy批量观测、Matplotlib评估图和pytest自动化测试。
 
 ## 运行已有天气演示
 
@@ -44,21 +45,22 @@ python3 src/test/weatherDemo.py
 ## 训练与评估
 
 ```bash
-python3 scripts/train_ppo.py --episodes 10 --max-steps 1200
-python3 scripts/train_dqn.py --episodes 10 --max-steps 1200
-python3 scripts/train_sac.py --episodes 10 --max-steps 1200
+uv run python scripts/train_ppo.py --episodes 10 --max-steps 1200
+uv run python scripts/train_dqn.py --episodes 10 --max-steps 1200
+uv run python scripts/train_sac.py --episodes 10 --max-steps 1200
 
-python3 scripts/evaluate.py ppo --checkpoint build/checkpoints/ppo.json
-python3 scripts/evaluate.py sipp --max-steps 1200
-python3 scripts/evaluate.py astar --max-steps 1200
+uv run python scripts/evaluate.py ppo --checkpoint build/checkpoints/ppo.pt
+uv run python scripts/evaluate.py sipp --max-steps 1200
+uv run python scripts/evaluate.py astar --max-steps 1200
 ```
 
 运行全部测试：
 
 ```bash
-python3 -m unittest discover -s src/test -p 'test*.py' -v
+uv run pytest
+uv run ruff check .
 ```
 
-当前RL网络使用标准库实现的线性函数逼近器，便于在无额外依赖的环境中验证完整算法闭环。`DualResolutionFeatureExtractor`是稳定替换边界，后续可以换成PyTorch双CNN而无需修改环境或训练接口。
+首次使用前执行 `uv sync --all-groups --frozen`。依赖声明位于 `pyproject.toml`，完整传递依赖由 `uv.lock` 锁定，详细说明见 [requirements.md](requirements.md)。
 
 依赖与建议安装方式见 [requirements.md](requirements.md)。

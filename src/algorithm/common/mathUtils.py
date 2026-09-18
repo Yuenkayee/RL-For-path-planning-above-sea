@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 
 def dot(first: Sequence[float], second: Sequence[float]) -> float:
-    return sum(left * right for left, right in zip(first, second))
+    return sum(left * right for left, right in zip(first, second, strict=True))
 
 
 def masked_softmax(

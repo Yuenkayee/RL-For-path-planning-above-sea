@@ -11,7 +11,9 @@ from training.checkpoint import load_checkpoint
 from .onlinePlanner import EpisodeResult, run_policy_episode
 
 
-def run_sac(checkpoint_path: str | Path, *, seed: int = 0, max_steps: int | None = None) -> EpisodeResult:
+def run_sac(
+    checkpoint_path: str | Path, *, seed: int = 0, max_steps: int | None = None
+) -> EpisodeResult:
     env = ReturnEnv()
     observation, _ = env.reset(seed=seed)
     agent = SACAgent(env.action_count, observation, seed=seed)

@@ -1,48 +1,33 @@
-"""Linear actor-critic network with a future CNN-compatible interface."""
+"""PyTorch dual-resolution actor-critic network."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-import random
+import torch
+from torch import Tensor, nn
 
-from algorithm.common.mathUtils import dot, masked_softmax
+from algorithm.common.featureExtractor import DualResolutionFeatureExtractor
 
 
-class PPONetwork:
-    def __init__(self, feature_count: int, action_count: int, *, seed: int | None = None) -> None:
-        rng = random.Random(seed)
-        self.feature_count = feature_count
+class PPONetwork(nn.Module):
+    def __init__(self, history_frames: int, action_count: int) -> None:
+        super().__init__()
+        self.history_frames = history_frames
         self.action_count = action_count
-        self.actor_weights = [
-            [rng.uniform(-0.01, 0.01) for _ in range(feature_count)]
-            for _ in range(action_count)
-        ]
-        self.value_weights = [0.0] * feature_count
+        self.extractor = DualResolutionFeatureExtractor(history_frames)
+        self.actor = nn.Sequential(
+            nn.Linear(self.extractor.output_dim, 256), nn.ReLU(), nn.Linear(256, action_count)
+        )
+        self.critic = nn.Sequential(
+            nn.Linear(self.extractor.output_dim, 256), nn.ReLU(), nn.Linear(256, 1)
+        )
 
-    def logits(self, features: Sequence[float]) -> tuple[float, ...]:
-        return tuple(dot(weights, features) for weights in self.actor_weights)
-
-    def probabilities(
-        self, features: Sequence[float], action_mask: Sequence[bool]
-    ) -> tuple[float, ...]:
-        return masked_softmax(self.logits(features), action_mask)
-
-    def value(self, features: Sequence[float]) -> float:
-        return dot(self.value_weights, features)
-
-    def state_dict(self) -> dict:
-        return {
-            "feature_count": self.feature_count,
-            "action_count": self.action_count,
-            "actor_weights": self.actor_weights,
-            "value_weights": self.value_weights,
-        }
-
-    def load_state_dict(self, state: dict) -> None:
-        if state["feature_count"] != self.feature_count or state["action_count"] != self.action_count:
-            raise ValueError("checkpoint network dimensions do not match")
-        self.actor_weights = [list(map(float, row)) for row in state["actor_weights"]]
-        self.value_weights = list(map(float, state["value_weights"]))
+    def forward(self, observation: dict[str, Tensor]) -> tuple[Tensor, Tensor]:
+        features = self.extractor(observation)
+        logits = self.actor(features)
+        masked_logits = logits.masked_fill(
+            ~observation["action_mask"], torch.finfo(logits.dtype).min
+        )
+        return masked_logits, self.critic(features).squeeze(-1)
 
 
 __all__ = ["PPONetwork"]

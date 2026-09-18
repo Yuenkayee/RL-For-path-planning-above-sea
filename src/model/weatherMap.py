@@ -23,12 +23,11 @@ generation, motion and prediction belong in the weather-system module.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-import math
 from threading import RLock
-from typing import Callable, Iterable, Iterator, Sequence
-
 
 FREE = 0
 THUNDERSTORM = 1
@@ -40,8 +39,7 @@ def _validate_binary(value: int) -> int:
     """Return a normalized binary value or raise a descriptive error."""
     if value not in _VALID_CELL_VALUES:
         raise ValueError(
-            f"weather cells must be {FREE} (free) or {THUNDERSTORM} "
-            f"(thunderstorm), got {value!r}"
+            f"weather cells must be {FREE} (free) or {THUNDERSTORM} (thunderstorm), got {value!r}"
         )
     return int(value)
 
@@ -56,8 +54,7 @@ def _cell_count(length_nm: float, resolution_nm: float, name: str) -> int:
     rounded = round(count)
     if not math.isclose(count, rounded, rel_tol=0.0, abs_tol=_FLOAT_TOLERANCE):
         raise ValueError(
-            f"{name} ({length_nm}) must be an integer multiple of the "
-            f"resolution ({resolution_nm})"
+            f"{name} ({length_nm}) must be an integer multiple of the resolution ({resolution_nm})"
         )
     return int(rounded)
 
@@ -65,7 +62,7 @@ def _cell_count(length_nm: float, resolution_nm: float, name: str) -> int:
 class _GridRow:
     """A mutable row view returned by ``BinaryGrid[row]``."""
 
-    def __init__(self, grid: "BinaryGrid", row: int) -> None:
+    def __init__(self, grid: BinaryGrid, row: int) -> None:
         self._grid = grid
         self._row = row
 
@@ -84,7 +81,7 @@ class _GridRow:
             if len(indices) != len(values):
                 raise ValueError("slice assignment cannot change a grid row's size")
             with self._grid.transaction():
-                for index, item in zip(indices, values):
+                for index, item in zip(indices, values, strict=True):
                     self._grid[self._row, index] = item
             return
         self._grid[self._row, column] = value  # type: ignore[arg-type]
@@ -174,9 +171,7 @@ class BinaryGrid:
             row = self._normalize_index(key, self._height, "row")
             return _GridRow(self, row)
 
-    def __setitem__(
-        self, key: int | tuple[int, int], value: int | Sequence[int]
-    ) -> None:
+    def __setitem__(self, key: int | tuple[int, int], value: int | Sequence[int]) -> None:
         with self._lock:
             if isinstance(key, tuple):
                 if len(key) != 2:
@@ -203,7 +198,7 @@ class BinaryGrid:
             self._on_change()
 
     @contextmanager
-    def transaction(self) -> Iterator["BinaryGrid"]:
+    def transaction(self) -> Iterator[BinaryGrid]:
         """Hold the grid lock while applying a group of cell mutations."""
         with self._lock:
             yield self
@@ -219,9 +214,7 @@ class BinaryGrid:
         if any(len(row) != width for row in normalized):
             raise ValueError("all grid rows must have the same length")
         if expected_shape is not None and (len(normalized), width) != expected_shape:
-            raise ValueError(
-                f"grid shape must be {expected_shape}, got {(len(normalized), width)}"
-            )
+            raise ValueError(f"grid shape must be {expected_shape}, got {(len(normalized), width)}")
         return normalized
 
     def replace(self, rows: Iterable[Iterable[int]]) -> None:
@@ -300,22 +293,14 @@ class WeatherMap:
         self._transaction_depth = 0
         self._transaction_dirty = False
 
-        self.area_size_nm = self._validate_pair(
-            area_size_nm, "area_size_nm", positive=True
-        )
+        self.area_size_nm = self._validate_pair(area_size_nm, "area_size_nm", positive=True)
         self.global_resolution_nm = self._validate_resolution(global_resolution_nm)
         self.local_resolution_nm = self._validate_resolution(local_resolution_nm)
         if self.local_resolution_nm >= self.global_resolution_nm:
-            raise ValueError(
-                "local_resolution_nm must be smaller than global_resolution_nm"
-            )
+            raise ValueError("local_resolution_nm must be smaller than global_resolution_nm")
 
-        global_width = _cell_count(
-            self.area_size_nm[0], self.global_resolution_nm, "area width"
-        )
-        global_height = _cell_count(
-            self.area_size_nm[1], self.global_resolution_nm, "area height"
-        )
+        global_width = _cell_count(self.area_size_nm[0], self.global_resolution_nm, "area width")
+        global_height = _cell_count(self.area_size_nm[1], self.global_resolution_nm, "area height")
 
         self.local_origin_nm, self.local_size_nm = self._validate_local_window(
             local_origin_nm, local_size_nm
@@ -388,7 +373,7 @@ class WeatherMap:
             self._version += 1
 
     @contextmanager
-    def transaction(self) -> Iterator["WeatherMap"]:
+    def transaction(self) -> Iterator[WeatherMap]:
         """Group several mutations into one atomic, single-version update."""
         with self._lock:
             self._transaction_depth += 1
@@ -424,9 +409,7 @@ class WeatherMap:
         """
         prepared_global = None
         if global_values is not None:
-            prepared_global = BinaryGrid.normalize_rows(
-                global_values, self.global_grid.shape
-            )
+            prepared_global = BinaryGrid.normalize_rows(global_values, self.global_grid.shape)
 
         window_changes = local_origin_nm is not None or local_size_nm is not None
         new_origin = local_origin_nm or self.local_origin_nm
@@ -436,9 +419,7 @@ class WeatherMap:
 
         prepared_local = None
         if local_values is not None:
-            prepared_local = BinaryGrid.normalize_rows(
-                local_values, (new_height, new_width)
-            )
+            prepared_local = BinaryGrid.normalize_rows(local_values, (new_height, new_width))
 
         with self.transaction():
             if prepared_global is not None:
@@ -517,19 +498,13 @@ class WeatherMap:
     def _validate_world_point(self, x_nm: float, y_nm: float) -> None:
         if not (math.isfinite(x_nm) and math.isfinite(y_nm)):
             raise ValueError("world coordinates must be finite")
-        if not (
-            0 <= x_nm < self.area_size_nm[0]
-            and 0 <= y_nm < self.area_size_nm[1]
-        ):
+        if not (0 <= x_nm < self.area_size_nm[0] and 0 <= y_nm < self.area_size_nm[1]):
             raise ValueError("point lies outside the global weather area")
 
     def contains_local(self, x_nm: float, y_nm: float) -> bool:
         origin_x, origin_y = self.local_origin_nm
         width, height = self.local_size_nm
-        return (
-            origin_x <= x_nm < origin_x + width
-            and origin_y <= y_nm < origin_y + height
-        )
+        return origin_x <= x_nm < origin_x + width and origin_y <= y_nm < origin_y + height
 
     def weather_at(self, x_nm: float, y_nm: float) -> int:
         """Read the finest available weather value at a world coordinate."""

@@ -15,11 +15,10 @@ and frigate cells respectively.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import struct
 import sys
-from typing import Iterable, Sequence
-
+from collections.abc import Iterable, Sequence
+from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
@@ -33,19 +32,18 @@ from model.weatherSystem import (  # noqa: E402
     WeatherSystem,
 )
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT_PATH = REPOSITORY_ROOT / "build" / "weatherSimu" / "weather_simulation.gif"
 
 
 _PALETTE = (
-    (82, 155, 191),   # 0: clear ocean
-    (190, 42, 48),    # 1: thunderstorm
+    (82, 155, 191),  # 0: clear ocean
+    (190, 42, 48),  # 1: thunderstorm
     (203, 225, 232),  # 2: map grid
-    (255, 196, 45),   # 3: helicopter
-    (64, 72, 86),     # 4: frigate
-    (10, 20, 30),     # 5: text and marker outlines
-    (33, 210, 123),   # 6: high-resolution local-window border
+    (255, 196, 45),  # 3: helicopter
+    (64, 72, 86),  # 4: frigate
+    (10, 20, 30),  # 5: text and marker outlines
+    (33, 210, 123),  # 6: high-resolution local-window border
     (248, 250, 251),  # 7: title background
 )
 
@@ -352,14 +350,14 @@ def _write_animated_gif(
     output.extend(bytes([0xF2, 0x00, 0x00]))  # 8-entry global color table.
     for red, green, blue in _PALETTE:
         output.extend(bytes([red, green, blue]))
-    output.extend(b"\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00")
+    output.extend(b"\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00")
 
     delay = max(1, round(frame_duration_ms / 10))
     for width, height, pixels in all_frames:
-        output.extend(b"\x21\xF9\x04\x04")
+        output.extend(b"\x21\xf9\x04\x04")
         output.extend(struct.pack("<H", delay))
         output.extend(b"\x00\x00")
-        output.extend(b"\x2C\x00\x00\x00\x00")
+        output.extend(b"\x2c\x00\x00\x00\x00")
         output.extend(struct.pack("<HH", width, height))
         output.append(0x00)
         output.append(3)
@@ -381,8 +379,7 @@ def create_weather_animation(
     system = WeatherSystem(configuration)
     output = Path(output_path).expanduser().resolve()
     rendered_frames = (
-        _render_frame(frame, configuration)
-        for frame in system.run(include_initial=True)
+        _render_frame(frame, configuration) for frame in system.run(include_initial=True)
     )
     frame_count = _write_animated_gif(
         output,

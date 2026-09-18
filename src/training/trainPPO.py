@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from torch.utils.tensorboard import SummaryWriter
+
 from algorithm.ppo import PPOAgent
 from env.returnEnv import ReturnEnv
 
@@ -18,6 +20,7 @@ def train_ppo(
     max_steps_per_episode: int | None = None,
     config_path: str | Path = "config/ppoConfig.json",
     checkpoint_path: str | Path | None = None,
+    log_dir: str | Path | None = None,
     seed: int = 0,
 ) -> tuple[PPOAgent, dict[str, float]]:
     observation, _ = env.reset(seed=seed)
@@ -30,28 +33,36 @@ def train_ppo(
         gae_lambda=config["gae_lambda"],
         clip_range=config["clip_range"],
         value_coefficient=config["value_coefficient"],
+        entropy_coefficient=config["entropy_coefficient"],
+        batch_size=config["batch_size"],
         update_epochs=config["update_epochs"],
         seed=seed,
     )
     total_reward = 0.0
     total_steps = 0
     successes = 0
+    writer = SummaryWriter(log_dir=str(log_dir)) if log_dir is not None else None
     for episode in range(episodes):
         observation, _ = env.reset(seed=seed + episode)
         step = 0
+        episode_reward = 0.0
         while True:
             action, prediction = agent.predict(observation)
             next_observation, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             agent.observe(observation, action, reward, done, prediction)
             total_reward += reward
+            episode_reward += reward
             total_steps += 1
             step += 1
             observation = next_observation
             if done or (max_steps_per_episode is not None and step >= max_steps_per_episode):
                 successes += info.get("outcome") == "success"
                 break
-        agent.update(last_value=0.0)
+        update_metrics = agent.update(last_value=0.0)
+        if writer is not None:
+            writer.add_scalar("episode/reward", episode_reward, episode)
+            writer.add_scalar("train/loss", update_metrics["loss"], episode)
     metrics = {
         "episodes": float(episodes),
         "steps": float(total_steps),
@@ -60,6 +71,8 @@ def train_ppo(
     }
     if checkpoint_path is not None:
         save_checkpoint(agent, checkpoint_path, metadata=metrics)
+    if writer is not None:
+        writer.close()
     return agent, metrics
 
 

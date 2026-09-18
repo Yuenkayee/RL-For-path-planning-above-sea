@@ -5,11 +5,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
+
 from model.weatherMap import WeatherMapSnapshot
 
 
-def _flatten(rows: Sequence[Sequence[int]]) -> tuple[int, ...]:
-    return tuple(cell for row in rows for cell in row)
+def _array(rows: Sequence[Sequence[int | float]], dtype: np.dtype) -> NDArray:
+    return np.asarray(rows, dtype=dtype)
 
 
 def build_observation(
@@ -26,45 +29,39 @@ def build_observation(
     guidance_global: tuple[tuple[float, ...], ...] | None = None,
     guidance_vector: tuple[float, ...] = (),
 ) -> dict[str, Any]:
-    """Return a dependency-free observation with immutable numeric values."""
+    """Return NumPy arrays suitable for Gymnasium and PyTorch."""
     if not history:
         raise ValueError("weather history cannot be empty")
     latest = history[-1]
     width, height = latest.area_size_nm
+    global_weather = np.stack([_array(frame.global_grid, np.uint8) for frame in history])
+    local_weather = np.stack([_array(frame.local_grid, np.uint8) for frame in history])
     return {
-        "global_weather": tuple(_flatten(frame.global_grid) for frame in history),
-        "global_shape": (
-            len(latest.global_grid),
-            len(latest.global_grid[0]),
+        "global_weather": global_weather,
+        "local_weather": local_weather,
+        "kinematics": np.asarray(
+            (
+                helicopter_nm[0] / width,
+                helicopter_nm[1] / height,
+                frigate_nm[0] / width,
+                frigate_nm[1] / height,
+                (frigate_nm[0] - helicopter_nm[0]) / width,
+                (frigate_nm[1] - helicopter_nm[1]) / height,
+                helicopter_heading_deg / 360.0,
+                helicopter_speed_knots / 50.0,
+                frigate_velocity_nm_per_hour[0] / 50.0,
+                frigate_velocity_nm_per_hour[1] / 50.0,
+                min(1.0, elapsed_seconds / maximum_seconds),
+            ),
+            dtype=np.float32,
         ),
-        "local_weather": tuple(_flatten(frame.local_grid) for frame in history),
-        "local_shape": (
-            len(latest.local_grid),
-            len(latest.local_grid[0]),
-        ),
-        "local_origin_nm": latest.local_origin_nm,
-        "kinematics": (
-            helicopter_nm[0] / width,
-            helicopter_nm[1] / height,
-            frigate_nm[0] / width,
-            frigate_nm[1] / height,
-            (frigate_nm[0] - helicopter_nm[0]) / width,
-            (frigate_nm[1] - helicopter_nm[1]) / height,
-            helicopter_heading_deg / 360.0,
-            helicopter_speed_knots / 50.0,
-            frigate_velocity_nm_per_hour[0] / 50.0,
-            frigate_velocity_nm_per_hour[1] / 50.0,
-            min(1.0, elapsed_seconds / maximum_seconds),
-        ),
-        "action_mask": action_mask,
+        "action_mask": np.asarray(action_mask, dtype=np.int8),
         "guidance_global": (
-            _flatten(guidance_global)
+            _array(guidance_global, np.float32)
             if guidance_global is not None
-            else tuple(0.0 for _ in range(len(latest.global_grid) * len(latest.global_grid[0])))
+            else np.zeros(global_weather.shape[-2:], dtype=np.float32)
         ),
-        "guidance_vector": guidance_vector,
-        "map_size_nm": latest.area_size_nm,
-        "weather_version": latest.version,
+        "guidance_vector": np.asarray(guidance_vector, dtype=np.float32),
     }
 
 

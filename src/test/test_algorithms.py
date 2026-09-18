@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+
+import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -50,10 +52,11 @@ class AlgorithmTests(unittest.TestCase):
         metrics = agent.update()
         self.assertEqual(metrics["samples"], 1.0)
         with tempfile.TemporaryDirectory() as directory:
-            path = save_checkpoint(agent, Path(directory) / "ppo.json")
+            path = save_checkpoint(agent, Path(directory) / "ppo.pt")
             restored = PPOAgent(self.env.action_count, self.observation, seed=2)
             load_checkpoint(restored, path)
-            self.assertEqual(agent.network.state_dict(), restored.network.state_dict())
+            for name, value in agent.network.state_dict().items():
+                self.assertTrue(torch.equal(value, restored.network.state_dict()[name]))
 
     def test_dqn_updates_from_replay(self) -> None:
         agent = DQNAgent(
@@ -64,14 +67,18 @@ class AlgorithmTests(unittest.TestCase):
             target_update_interval=1,
             seed=1,
         )
-        agent.observe(Transition(self.observation, 0, self.reward, self.next_observation, self.done))
+        agent.observe(
+            Transition(self.observation, 0, self.reward, self.next_observation, self.done)
+        )
         metrics = agent.update()
         self.assertEqual(metrics["samples"], 1.0)
         self.assertGreaterEqual(metrics["loss"], 0.0)
 
     def test_discrete_sac_updates_from_replay(self) -> None:
         agent = SACAgent(self.env.action_count, self.observation, batch_size=1, seed=1)
-        agent.observe(Transition(self.observation, 0, self.reward, self.next_observation, self.done))
+        agent.observe(
+            Transition(self.observation, 0, self.reward, self.next_observation, self.done)
+        )
         metrics = agent.update()
         self.assertEqual(metrics["samples"], 1.0)
         self.assertGreater(metrics["alpha"], 0.0)

@@ -2,34 +2,30 @@
 
 from __future__ import annotations
 
-import math
-import random
-from collections.abc import Sequence
-
-from algorithm.common.mathUtils import argmax_masked, sample_categorical
+import torch
+from torch.distributions import Categorical
 
 from .ppoNetwork import PPONetwork
 
 
 class MaskedCategoricalPolicy:
-    def __init__(self, network: PPONetwork, *, seed: int | None = None) -> None:
+    def __init__(self, network: PPONetwork) -> None:
         self.network = network
-        self.rng = random.Random(seed)
 
     def select(
         self,
-        features: Sequence[float],
-        action_mask: Sequence[bool],
+        observation: dict[str, torch.Tensor],
         *,
         deterministic: bool = False,
     ) -> tuple[int, float, float]:
-        probabilities = self.network.probabilities(features, action_mask)
-        action = (
-            argmax_masked(probabilities, action_mask)
-            if deterministic
-            else sample_categorical(probabilities, self.rng)
+        logits, values = self.network(observation)
+        distribution = Categorical(logits=logits)
+        actions = torch.argmax(logits, dim=-1) if deterministic else distribution.sample()
+        return (
+            int(actions[0].item()),
+            float(distribution.log_prob(actions)[0].item()),
+            float(values[0].item()),
         )
-        return action, math.log(max(probabilities[action], 1e-12)), self.network.value(features)
 
 
 __all__ = ["MaskedCategoricalPolicy"]

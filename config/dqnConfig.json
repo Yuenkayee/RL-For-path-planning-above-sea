@@ -2,7 +2,7 @@
   "algorithm": "masked_dueling_double_dqn",
   "learning_rate": 0.0001,
   "discount_factor": 0.99,
-  "replay_capacity": 200000,
+  "replay_capacity": 20000,
   "batch_size": 128,
   "n_step": 3,
   "target_update_interval": 1000,

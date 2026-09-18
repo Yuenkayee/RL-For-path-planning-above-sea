@@ -9,13 +9,7 @@ from model.weatherMap import FREE, WeatherMapSnapshot
 
 from .globalPlanner import PlanResult, TimedWaypoint
 
-
-_MOVES = tuple(
-    (dr, dc)
-    for dr in (-1, 0, 1)
-    for dc in (-1, 0, 1)
-    if not (dr == 0 and dc == 0)
-)
+_MOVES = tuple((dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if not (dr == 0 and dc == 0))
 
 
 class TimeExpandedAStarPlanner:
@@ -73,9 +67,7 @@ class TimeExpandedAStarPlanner:
 
         start_state = (start_cell[0], start_cell[1], 0)
         frontier = [(0.0, 0.0, start_state)]
-        came_from: dict[tuple[int, int, int], tuple[int, int, int] | None] = {
-            start_state: None
-        }
+        came_from: dict[tuple[int, int, int], tuple[int, int, int] | None] = {start_state: None}
         cost_so_far = {start_state: 0.0}
         expanded = 0
         goal_state: tuple[int, int, int] | None = None
@@ -100,14 +92,15 @@ class TimeExpandedAStarPlanner:
                 if not (0 <= next_row < height and 0 <= next_column < width):
                     continue
                 distance_nm = resolution * math.hypot(dr, dc)
-                travel_steps = 1 if distance_nm == 0 else max(
-                    1,
-                    math.ceil(
-                        distance_nm
-                        / self.helicopter_speed_knots
-                        * 3600.0
-                        / self.step_seconds
-                    ),
+                travel_steps = (
+                    1
+                    if distance_nm == 0
+                    else max(
+                        1,
+                        math.ceil(
+                            distance_nm / self.helicopter_speed_knots * 3600.0 / self.step_seconds
+                        ),
+                    )
                 )
                 next_time = time_step + travel_steps
                 if next_time > self.horizon_steps:
@@ -123,8 +116,10 @@ class TimeExpandedAStarPlanner:
                 cost_so_far[next_state] = new_cost
                 came_from[next_state] = current
                 target = target_at(next_time)
-                heuristic = 0.0 if target is None else math.hypot(
-                    target[0] - next_row, target[1] - next_column
+                heuristic = (
+                    0.0
+                    if target is None
+                    else math.hypot(target[0] - next_row, target[1] - next_column)
                 )
                 heapq.heappush(frontier, (new_cost + heuristic, new_cost, next_state))
 

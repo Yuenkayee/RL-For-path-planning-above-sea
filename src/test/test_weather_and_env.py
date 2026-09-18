@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from pathlib import Path
 import sys
 import unittest
+from dataclasses import replace
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -58,7 +58,8 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
             weather_history_frames=2,
         )
         env = ReturnEnv(config, weather_parameters=clear_weather_parameters())
-        _, _ = env.reset(seed=1)
+        observation, _ = env.reset(seed=1)
+        self.assertTrue(env.observation_space.contains(observation))
         _, _, terminated, truncated, info = env.step(0)
         self.assertTrue(terminated)
         self.assertFalse(truncated)
@@ -68,7 +69,9 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
         parameters = clear_weather_parameters(
             frigate_initial_nm=(20.0, 20.0),
         )
-        env = ReturnEnv(EnvironmentConfig(maximum_episode_minutes=5.0), weather_parameters=parameters)
+        env = ReturnEnv(
+            EnvironmentConfig(maximum_episode_minutes=5.0), weather_parameters=parameters
+        )
         env.reset(seed=1)
         updates = []
         for _ in range(10):

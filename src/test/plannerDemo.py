@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 import sys
+from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SRC))
@@ -31,7 +31,12 @@ def main() -> None:
     )
     for planner in (SIPPPlanner(), TimeExpandedAStarPlanner()):
         result = planner.plan(*arguments)
-        print(type(planner).__name__, result.reached_goal, result.expanded_states, len(result.waypoints))
+        print(
+            type(planner).__name__,
+            result.reached_goal,
+            result.expanded_states,
+            len(result.waypoints),
+        )
 
 
 if __name__ == "__main__":

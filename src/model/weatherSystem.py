@@ -27,12 +27,13 @@ No physical claim beyond this scenario-level abstraction is intended.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, replace
 import json
 import math
-from pathlib import Path
 import random
-from typing import Any, Iterator, Mapping
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field, fields, replace
+from pathlib import Path
+from typing import Any
 
 try:  # Package import: ``from model.weatherSystem import WeatherSystem``.
     from .weatherMap import FREE, THUNDERSTORM, WeatherMap, WeatherMapSnapshot
@@ -50,9 +51,7 @@ def _reject_unknown_fields(
     allowed = {item.name for item in fields(dataclass_type)}
     unknown = sorted(set(data) - allowed)
     if unknown:
-        raise ValueError(
-            f"unknown field(s) in {section_name}: {', '.join(unknown)}"
-        )
+        raise ValueError(f"unknown field(s) in {section_name}: {', '.join(unknown)}")
 
 
 def _as_pair(value: Any, name: str) -> tuple[float, float]:
@@ -99,9 +98,7 @@ class WeatherParameters:
         )
         wave_min, wave_max = self.significant_wave_height_range_m
         if not wave_min <= self.significant_wave_height_m <= wave_max:
-            raise ValueError(
-                "significant_wave_height_m must lie inside its configured range"
-            )
+            raise ValueError("significant_wave_height_m must lie inside its configured range")
         if not math.isfinite(self.storm_motion_speed_knots) or self.storm_motion_speed_knots < 0:
             raise ValueError("storm_motion_speed_knots must be finite and non-negative")
         if not math.isfinite(self.storm_motion_direction_deg):
@@ -115,9 +112,7 @@ class WeatherParameters:
         if self.maximum_storm_count < self.initial_storm_count:
             raise ValueError("maximum_storm_count cannot be smaller than initial_storm_count")
         self._validate_range(self.cell_radius_nm_range, "cell_radius_nm_range", 0.0)
-        self._validate_range(
-            self.cell_aspect_ratio_range, "cell_aspect_ratio_range", 0.0
-        )
+        self._validate_range(self.cell_aspect_ratio_range, "cell_aspect_ratio_range", 0.0)
         if self.cell_radius_nm_range[0] <= 0:
             raise ValueError("cell radii must be strictly positive")
         if self.cell_aspect_ratio_range[0] <= 0:
@@ -144,9 +139,7 @@ class WeatherParameters:
             raise ValueError("storm_area_scale must be positive and finite")
 
     @staticmethod
-    def _validate_range(
-        value: tuple[float, float], name: str, minimum: float
-    ) -> None:
+    def _validate_range(value: tuple[float, float], name: str, minimum: float) -> None:
         if len(value) != 2 or not all(math.isfinite(item) for item in value):
             raise ValueError(f"{name} must contain two finite values")
         if value[0] < minimum or value[0] > value[1]:
@@ -155,7 +148,7 @@ class WeatherParameters:
             raise ValueError(f"{name} cannot be entirely zero")
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "WeatherParameters":
+    def from_dict(cls, data: Mapping[str, Any]) -> WeatherParameters:
         """Build weather parameters from the ``weather`` JSON object."""
         if not isinstance(data, Mapping):
             raise ValueError("weather must be a JSON object")
@@ -234,8 +227,10 @@ class SimulationParameters:
     ) -> None:
         if len(point) != 2 or not all(math.isfinite(item) for item in point):
             raise ValueError(f"{name} must contain two finite coordinates")
-        comparison = (lambda coordinate, bound: coordinate <= bound) if upper_edge else (
-            lambda coordinate, bound: coordinate < bound
+        comparison = (
+            (lambda coordinate, bound: coordinate <= bound)
+            if upper_edge
+            else (lambda coordinate, bound: coordinate < bound)
         )
         if (
             point[0] < 0
@@ -250,7 +245,7 @@ class SimulationParameters:
         return round(self.total_time_minutes / self.time_step_minutes)
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "SimulationParameters":
+    def from_dict(cls, data: Mapping[str, Any]) -> SimulationParameters:
         """Build and validate all simulation parameters from parsed JSON."""
         if not isinstance(data, Mapping):
             raise ValueError("weather configuration root must be a JSON object")
@@ -265,9 +260,7 @@ class SimulationParameters:
             if name in values:
                 values[name] = _as_pair(values[name], name)
         if "local_origin_nm" in values and values["local_origin_nm"] is not None:
-            values["local_origin_nm"] = _as_pair(
-                values["local_origin_nm"], "local_origin_nm"
-            )
+            values["local_origin_nm"] = _as_pair(values["local_origin_nm"], "local_origin_nm")
         if "weather" in values:
             values["weather"] = WeatherParameters.from_dict(values["weather"])
         try:
@@ -276,9 +269,7 @@ class SimulationParameters:
             raise ValueError(f"invalid simulation configuration: {error}") from error
 
     @classmethod
-    def from_json(
-        cls, path: str | Path = DEFAULT_CONFIG_PATH
-    ) -> "SimulationParameters":
+    def from_json(cls, path: str | Path = DEFAULT_CONFIG_PATH) -> SimulationParameters:
         """Load UTF-8 JSON configuration and validate every field."""
         config_path = Path(path).expanduser().resolve()
         try:
@@ -450,12 +441,8 @@ class WeatherSystem:
                 orientation_rad=self._rng.uniform(0.0, math.tau),
                 lifetime_minutes=lifetime,
                 age_minutes=initial_age,
-                speed_knots=weather.storm_motion_speed_knots
-                * self._rng.uniform(0.85, 1.15),
-                heading_deg=(
-                    weather.storm_motion_direction_deg
-                    + self._rng.uniform(-12.0, 12.0)
-                )
+                speed_knots=weather.storm_motion_speed_knots * self._rng.uniform(0.85, 1.15),
+                heading_deg=(weather.storm_motion_direction_deg + self._rng.uniform(-12.0, 12.0))
                 % 360.0,
                 phase_one=self._rng.uniform(0.0, math.tau),
                 phase_two=self._rng.uniform(0.0, math.tau),

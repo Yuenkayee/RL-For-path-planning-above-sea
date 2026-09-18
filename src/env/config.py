@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import math
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .reward import RewardWeights
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_CONFIG_PATH = REPOSITORY_ROOT / "config" / "envConfig.json"
@@ -64,7 +64,7 @@ class EnvironmentConfig:
         return self.helicopter_speed_knots[1]
 
     @classmethod
-    def from_mapping(cls, values: Mapping[str, Any]) -> "EnvironmentConfig":
+    def from_mapping(cls, values: Mapping[str, Any]) -> EnvironmentConfig:
         data = dict(values)
         if "helicopter_speed_knots" in data:
             speeds = data["helicopter_speed_knots"]
@@ -76,7 +76,7 @@ class EnvironmentConfig:
         return cls(**data)
 
     @classmethod
-    def from_json(cls, path: str | Path = DEFAULT_ENV_CONFIG_PATH) -> "EnvironmentConfig":
+    def from_json(cls, path: str | Path = DEFAULT_ENV_CONFIG_PATH) -> EnvironmentConfig:
         with Path(path).expanduser().resolve().open(encoding="utf-8") as stream:
             return cls.from_mapping(json.load(stream))
 

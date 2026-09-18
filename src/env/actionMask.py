@@ -80,9 +80,7 @@ def build_action_mask(
                 position_nm, current_heading_deg, wait_speed_knots, duration_seconds
             )
         else:
-            destination = endpoint(
-                position_nm, heading, flight_speed_knots, duration_seconds
-            )
+            destination = endpoint(position_nm, heading, flight_speed_knots, duration_seconds)
         mask.append(segment_is_clear(weather_map, position_nm, destination))
     return tuple(mask)
 

@@ -3,7 +3,7 @@
   "learning_rate": 0.0003,
   "discount_factor": 0.99,
   "soft_update_factor": 0.005,
-  "replay_capacity": 1000000,
+  "replay_capacity": 20000,
   "batch_size": 256,
   "automatic_entropy_tuning": true,
   "note": "Discrete maximum-entropy SAC using the same wait-plus-heading action set for a fair comparison."

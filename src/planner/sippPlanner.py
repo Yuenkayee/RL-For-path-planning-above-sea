@@ -9,13 +9,7 @@ from model.weatherMap import FREE, WeatherMapSnapshot
 
 from .globalPlanner import PlanResult, TimedWaypoint
 
-
-_NEIGHBORS = tuple(
-    (dr, dc)
-    for dr in (-1, 0, 1)
-    for dc in (-1, 0, 1)
-    if (dr, dc) != (0, 0)
-)
+_NEIGHBORS = tuple((dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0))
 
 
 def safe_intervals(
@@ -82,7 +76,11 @@ class SIPPPlanner:
         if start_cell is None:
             return PlanResult((), False, 0, math.inf, "start outside map")
         start_interval_index = next(
-            (index for index, interval in enumerate(intervals[start_cell]) if interval[0] <= 0 <= interval[1]),
+            (
+                index
+                for index, interval in enumerate(intervals[start_cell])
+                if interval[0] <= 0 <= interval[1]
+            ),
             None,
         )
         if start_interval_index is None:
@@ -99,9 +97,7 @@ class SIPPPlanner:
 
         start_node = (start_cell[0], start_cell[1], start_interval_index)
         arrival = {start_node: 0}
-        parent: dict[tuple[int, int, int], tuple[int, int, int] | None] = {
-            start_node: None
-        }
+        parent: dict[tuple[int, int, int], tuple[int, int, int] | None] = {start_node: None}
         frontier = [(0.0, 0, start_node)]
         expanded = 0
         goal_node: tuple[int, int, int] | None = None
@@ -136,10 +132,7 @@ class SIPPPlanner:
                 travel_steps = max(
                     1,
                     math.ceil(
-                        distance_nm
-                        / self.helicopter_speed_knots
-                        * 3600.0
-                        / self.step_seconds
+                        distance_nm / self.helicopter_speed_knots * 3600.0 / self.step_seconds
                     ),
                 )
                 for next_index, safe in enumerate(intervals[next_cell]):
@@ -153,8 +146,10 @@ class SIPPPlanner:
                     arrival[next_node] = candidate_time
                     parent[next_node] = node
                     target = target_at(candidate_time)
-                    heuristic = 0.0 if target is None else math.hypot(
-                        target[0] - next_cell[0], target[1] - next_cell[1]
+                    heuristic = (
+                        0.0
+                        if target is None
+                        else math.hypot(target[0] - next_cell[0], target[1] - next_cell[1])
                     )
                     heapq.heappush(
                         frontier,

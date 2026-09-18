@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import random
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -17,7 +17,9 @@ class Transition:
 
 
 class ReplayBuffer:
-    def __init__(self, capacity: int, *, prioritized: bool = False, seed: int | None = None) -> None:
+    def __init__(
+        self, capacity: int, *, prioritized: bool = False, seed: int | None = None
+    ) -> None:
         if capacity <= 0:
             raise ValueError("capacity must be positive")
         self.capacity = capacity

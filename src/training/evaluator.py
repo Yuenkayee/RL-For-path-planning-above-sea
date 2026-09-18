@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
-from typing import Any, Callable
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-from env.returnEnv import ReturnEnv
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+os.environ.setdefault("MPLCONFIGDIR", str(_REPOSITORY_ROOT / "build" / ".matplotlib"))
+
+import matplotlib  # noqa: E402
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
+from env.returnEnv import ReturnEnv  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -54,8 +65,30 @@ def evaluate_policy(
         collisions=sum(outcome == "storm_collision" for outcome in outcomes),
         timeouts=sum(outcome == "timeout" for outcome in outcomes),
         mean_reward=sum(rewards) / len(rewards) if rewards else math.nan,
-        mean_steps=sum(steps_per_episode) / len(steps_per_episode) if steps_per_episode else math.nan,
+        mean_steps=sum(steps_per_episode) / len(steps_per_episode)
+        if steps_per_episode
+        else math.nan,
     )
 
 
-__all__ = ["EvaluationResult", "evaluate_policy"]
+def save_evaluation_plot(results: dict[str, EvaluationResult], path: str | Path) -> Path:
+    """Save success-rate and mean-step comparison as a PNG figure."""
+    output = Path(path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    names = list(results)
+    figure, axes = plt.subplots(1, 2, figsize=(10, 4))
+    axes[0].bar(names, [results[name].success_rate for name in names])
+    axes[0].set_ylim(0.0, 1.0)
+    axes[0].set_title("Success rate")
+    axes[1].bar(names, [results[name].mean_steps for name in names])
+    axes[1].set_title("Mean control steps")
+    for axis in axes:
+        axis.tick_params(axis="x", rotation=25)
+        axis.grid(axis="y", alpha=0.25)
+    figure.tight_layout()
+    figure.savefig(output, dpi=160)
+    plt.close(figure)
+    return output
+
+
+__all__ = ["EvaluationResult", "evaluate_policy", "save_evaluation_plot"]

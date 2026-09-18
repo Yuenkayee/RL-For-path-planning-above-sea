@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
-from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -18,7 +18,7 @@ class RewardWeights:
     progress: float = 1.0
 
     @classmethod
-    def from_mapping(cls, values: Mapping[str, float]) -> "RewardWeights":
+    def from_mapping(cls, values: Mapping[str, float]) -> RewardWeights:
         allowed = {item.name for item in fields(cls)}
         unknown = set(values) - allowed
         if unknown:
@@ -35,9 +35,7 @@ def calculate_reward(
     speed_switched: bool,
     outcome: str | None,
 ) -> float:
-    reward = weights.step + weights.progress * (
-        previous_distance_nm - current_distance_nm
-    )
+    reward = weights.step + weights.progress * (previous_distance_nm - current_distance_nm)
     if waited:
         reward += weights.wait
     if speed_switched:
