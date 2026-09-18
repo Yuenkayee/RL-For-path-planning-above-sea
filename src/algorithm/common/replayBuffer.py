@@ -65,6 +65,7 @@ class RolloutStep:
     value: float
     log_probability: float
     done: bool
+    environment_id: int = 0
 
 
 class RolloutBuffer:

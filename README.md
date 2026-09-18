@@ -69,4 +69,10 @@ Ubuntu 22.04训练服务器可运行：
 ./shell/check_training_server.sh --require-cuda
 ```
 
+PPO默认并行运行4个环境，自动选择CUDA、Apple MPS或CPU，并每100步输出各episode进度：
+
+```bash
+uv run python scripts/train_ppo.py --episodes 1000 --max-steps 1200 --num-envs 8 --device auto
+```
+
 依赖与建议安装方式见 [requirements.md](requirements.md)。

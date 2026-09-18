@@ -57,13 +57,46 @@ class PPOAgent:
     def predict(
         self, observation: dict[str, Any], *, deterministic: bool = False
     ) -> tuple[int, dict[str, float]]:
-        tensors = observations_to_tensors((observation,), self.device)
+        actions, predictions = self.predict_batch((observation,), deterministic=deterministic)
+        return actions[0], predictions[0]
+
+    def predict_batch(
+        self,
+        observations: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+        *,
+        deterministic: bool = False,
+    ) -> tuple[list[int], list[dict[str, float]]]:
+        """Select actions for several environments in one network forward pass."""
+        if not observations:
+            return [], []
+        tensors = observations_to_tensors(observations, self.device)
         self.network.eval()
         with torch.no_grad():
-            action, log_probability, value = self.policy.select(
-                tensors, deterministic=deterministic
+            logits, values = self.network(tensors)
+            distribution = Categorical(logits=logits)
+            actions = torch.argmax(logits, dim=-1) if deterministic else distribution.sample()
+            log_probabilities = distribution.log_prob(actions)
+        return actions.cpu().tolist(), [
+            {
+                "log_probability": float(log_probability),
+                "value": float(value),
+            }
+            for log_probability, value in zip(
+                log_probabilities.cpu().tolist(), values.cpu().tolist(), strict=True
             )
-        return action, {"log_probability": log_probability, "value": value}
+        ]
+
+    def predict_values(
+        self, observations: list[dict[str, Any]] | tuple[dict[str, Any], ...]
+    ) -> list[float]:
+        """Return critic values used to bootstrap a fixed-length rollout."""
+        if not observations:
+            return []
+        tensors = observations_to_tensors(observations, self.device)
+        self.network.eval()
+        with torch.no_grad():
+            _, values = self.network(tensors)
+        return [float(value) for value in values.cpu().tolist()]
 
     def observe(
         self,
@@ -72,6 +105,8 @@ class PPOAgent:
         reward: float,
         done: bool,
         prediction_info: dict[str, float],
+        *,
+        environment_id: int = 0,
     ) -> None:
         self.buffer.add(
             RolloutStep(
@@ -81,24 +116,39 @@ class PPOAgent:
                 prediction_info["value"],
                 prediction_info["log_probability"],
                 done,
+                environment_id,
             )
         )
 
-    def update(self, *, last_value: float = 0.0) -> dict[str, float]:
+    def update(
+        self,
+        *,
+        last_value: float = 0.0,
+        last_values: dict[int, float] | None = None,
+    ) -> dict[str, float]:
         if not self.buffer.steps:
             return {"loss": 0.0, "samples": 0.0}
         advantages = [0.0] * len(self.buffer.steps)
         returns = [0.0] * len(self.buffer.steps)
-        gae = 0.0
-        next_value = last_value
-        for index in reversed(range(len(self.buffer.steps))):
-            step = self.buffer.steps[index]
-            continuation = 0.0 if step.done else 1.0
-            delta = step.reward + self.discount_factor * next_value * continuation - step.value
-            gae = delta + self.discount_factor * self.gae_lambda * continuation * gae
-            advantages[index] = gae
-            returns[index] = gae + step.value
-            next_value = step.value
+        indices_by_environment: dict[int, list[int]] = {}
+        for index, step in enumerate(self.buffer.steps):
+            indices_by_environment.setdefault(step.environment_id, []).append(index)
+        bootstrap_values = last_values or {0: last_value}
+        for environment_id, indices in indices_by_environment.items():
+            gae = 0.0
+            next_value = bootstrap_values.get(environment_id, 0.0)
+            for index in reversed(indices):
+                step = self.buffer.steps[index]
+                continuation = 0.0 if step.done else 1.0
+                delta = (
+                    step.reward
+                    + self.discount_factor * next_value * continuation
+                    - step.value
+                )
+                gae = delta + self.discount_factor * self.gae_lambda * continuation * gae
+                advantages[index] = gae
+                returns[index] = gae + step.value
+                next_value = step.value
         advantages_tensor = torch.as_tensor(advantages, dtype=torch.float32, device=self.device)
         advantages_tensor = (advantages_tensor - advantages_tensor.mean()) / (
             advantages_tensor.std(unbiased=False) + 1e-8
