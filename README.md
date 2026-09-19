@@ -54,6 +54,26 @@ uv run python scripts/evaluate.py sipp --max-steps 1200
 uv run python scripts/evaluate.py astar --max-steps 1200
 ```
 
+查看训练曲线：
+
+```bash
+tensorboard --logdir build/logs --port 6006
+```
+
+在固定 `seed` 场景下回放路径规划过程（输出 GIF 动画和最终路径 PNG）：
+
+```bash
+python scripts/visualize_episode.py ppo \
+  --checkpoint build/checkpoints/ppo.pt \
+  --seed 0 \
+  --max-steps 1200
+
+# 不需要 checkpoint 的传统规划器
+python scripts/visualize_episode.py sipp --seed 0 --max-steps 1200
+```
+
+默认输出到 `build/evaluation/<method>_seed<seed>.gif` 和同名 `.png`。
+
 运行全部测试：
 
 ```bash

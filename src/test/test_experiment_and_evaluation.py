@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from env.config import EnvironmentConfig
 from env.returnEnv import ReturnEnv
 from experiment import EXPERIMENT_GROUPS
+from inference.episodeVisualization import run_episode_trace, save_episode_visualization
 from model.weatherSystem import SimulationParameters, WeatherParameters
 from training.curriculum import DEFAULT_CURRICULUM, stage_for_progress
 from training.evaluator import evaluate_policy, save_evaluation_plot
@@ -59,6 +60,23 @@ class ExperimentAndEvaluationTests(unittest.TestCase):
         self.assertEqual(result.success_rate, 1.0)
         with tempfile.TemporaryDirectory() as directory:
             output = save_evaluation_plot({"wait": result}, Path(directory) / "result.png")
+            self.assertGreater(output.stat().st_size, 0)
+
+    def test_episode_trace_and_static_visualization(self) -> None:
+        env = _easy_environment()
+        trace = run_episode_trace(
+            env,
+            _WaitPolicy(),
+            method="wait",
+            seed=3,
+            max_steps=2,
+            frame_stride=1,
+        )
+        self.assertEqual(trace.outcome, "success")
+        self.assertEqual(trace.steps, 1)
+        self.assertEqual(len(trace.helicopter_path_nm), 2)
+        with tempfile.TemporaryDirectory() as directory:
+            output = save_episode_visualization(trace, Path(directory) / "episode.png")
             self.assertGreater(output.stat().st_size, 0)
 
 

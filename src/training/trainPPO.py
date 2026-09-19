@@ -100,6 +100,21 @@ def _final_info_at(infos: dict[str, Any], index: int) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _flush_ordered_episode_metrics(
+    writer: SummaryWriter,
+    pending: dict[int, tuple[float, int, bool]],
+    next_episode_id: int,
+) -> int:
+    """Write all contiguous completed episodes in episode-id order."""
+    while next_episode_id in pending:
+        reward, steps, succeeded = pending.pop(next_episode_id)
+        writer.add_scalar("episode/reward", reward, next_episode_id)
+        writer.add_scalar("episode/steps", steps, next_episode_id)
+        writer.add_scalar("episode/success", succeeded, next_episode_id)
+        next_episode_id += 1
+    return next_episode_id
+
+
 def _resolve_device(requested: str) -> str:
     normalized = requested.lower()
     if normalized == "auto":
@@ -203,6 +218,8 @@ def train_ppo(
     episode_steps = [0] * worker_count
     episode_rewards = [0.0] * worker_count
     episode_started_at = [time.perf_counter()] * worker_count
+    pending_episode_metrics: dict[int, tuple[float, int, bool]] = {}
+    next_episode_to_log = 0
     maximum_progress_steps = max_steps_per_episode or round(
         env.config.maximum_episode_minutes * 60.0 / env.config.control_step_seconds
     )
@@ -291,9 +308,16 @@ def train_ppo(
                 completed_episodes += 1
                 elapsed = time.perf_counter() - episode_started_at[worker]
                 if writer is not None:
-                    writer.add_scalar("episode/reward", episode_rewards[worker], episode_id)
-                    writer.add_scalar("episode/steps", episode_steps[worker], episode_id)
-                    writer.add_scalar("episode/success", outcome == "success", episode_id)
+                    pending_episode_metrics[episode_id] = (
+                        episode_rewards[worker],
+                        episode_steps[worker],
+                        outcome == "success",
+                    )
+                    next_episode_to_log = _flush_ordered_episode_metrics(
+                        writer,
+                        pending_episode_metrics,
+                        next_episode_to_log,
+                    )
                 if show_progress:
                     print(
                         f"[PPO] episode {episode_id + 1}/{episodes} complete "

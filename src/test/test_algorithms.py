@@ -20,7 +20,15 @@ from env.config import EnvironmentConfig
 from env.returnEnv import ReturnEnv
 from model.weatherSystem import SimulationParameters, WeatherParameters
 from training.checkpoint import load_checkpoint, save_checkpoint
-from training.trainPPO import train_ppo
+from training.trainPPO import _flush_ordered_episode_metrics, train_ppo
+
+
+class _RecordingWriter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float | int | bool, int]] = []
+
+    def add_scalar(self, tag: str, value: float | int | bool, step: int) -> None:
+        self.calls.append((tag, value, step))
 
 
 def make_environment() -> ReturnEnv:
@@ -128,6 +136,24 @@ class AlgorithmTests(unittest.TestCase):
             if line.startswith("[PPO] episode") and " complete " in line
         ]
         self.assertEqual(len(completed_lines), 3)
+
+    def test_parallel_episode_metrics_are_flushed_in_episode_order(self) -> None:
+        writer = _RecordingWriter()
+        pending = {
+            2: (12.0, 30, True),
+            0: (-5.0, 20, False),
+        }
+        next_episode = _flush_ordered_episode_metrics(writer, pending, 0)  # type: ignore[arg-type]
+        self.assertEqual(next_episode, 1)
+        self.assertEqual({call[2] for call in writer.calls}, {0})
+
+        pending[1] = (3.0, 25, True)
+        next_episode = _flush_ordered_episode_metrics(  # type: ignore[arg-type]
+            writer, pending, next_episode
+        )
+        self.assertEqual(next_episode, 3)
+        self.assertEqual([call[2] for call in writer.calls], [0, 0, 0, 1, 1, 1, 2, 2, 2])
+        self.assertFalse(pending)
 
     def test_dqn_updates_from_replay(self) -> None:
         agent = DQNAgent(
