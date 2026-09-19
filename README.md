@@ -99,6 +99,24 @@ PPO默认并行运行4个环境，自动选择CUDA、Apple MPS或CPU，并每100
 python scripts/train_ppo.py --episodes 5000 --max-steps 1200 --num-envs 8 --device auto
 ```
 
+也可以在已激活的服务器 Python 环境中直接使用启动脚本。脚本默认训练
+5000 个 episode、8 个并行环境，同时保存终端输出、TensorBoard 日志和模型检查点：
+
+```bash
+./shell/start_ppo_training.sh
+```
+
+如需在退出 SSH 后继续训练：
+
+```bash
+mkdir -p build/logs/ppo
+nohup ./shell/start_ppo_training.sh > build/logs/ppo/nohup.log 2>&1 &
+```
+
+可通过环境变量修改默认参数，例如
+`NUM_ENVS=4 DEVICE=cuda ./shell/start_ppo_training.sh`。命令行追加参数也会传给
+`scripts/train_ppo.py`，例如 `./shell/start_ppo_training.sh --quiet`。
+
 PPO 默认启用四阶段课程学习，按全局 episode 编号依次使用无雷雨、静态雷雨、
 移动雷雨和稠密动态雷雨。消融实验可添加 `--no-curriculum` 关闭。护卫舰默认从
 `(20, 20)` 海里出发并始终以 `45°` 向东北航行。
