@@ -22,7 +22,7 @@ from planner.timeExpandedAStar import TimeExpandedAStarPlanner
 from .actionMask import build_action_mask, heading_for_action, segment_is_clear
 from .config import DEFAULT_ENV_CONFIG_PATH, EnvironmentConfig
 from .observation import build_observation
-from .reward import calculate_reward
+from .reward import calculate_reward, newly_reached_proximity_bonus
 from .termination import inside_map, successful_rendezvous
 
 
@@ -102,6 +102,7 @@ class ReturnEnv(gym.Env):
         )
         self._guidance_plan = None
         self._guidance_grid: tuple[tuple[float, ...], ...] | None = None
+        self._reached_proximity_thresholds_nm: set[float] = set()
         self._done = False
         self.reset()
 
@@ -142,6 +143,7 @@ class ReturnEnv(gym.Env):
         self.elapsed_seconds = 0.0
         self._weather_elapsed_seconds = 0.0
         self._previous_moving = False
+        self._reached_proximity_thresholds_nm.clear()
         self._done = False
         self._history.clear()
         snapshot = self.weather_map.snapshot()
@@ -257,6 +259,7 @@ class ReturnEnv(gym.Env):
 
         end = (self.helicopter.x_nm, self.helicopter.y_nm)
         frigate_end = (self.frigate.x_nm, self.frigate.y_nm)
+        current_distance = math.dist(end, frigate_end)
         outcome: str | None = None
         terminated = False
         truncated = False
@@ -273,7 +276,7 @@ class ReturnEnv(gym.Env):
                 self.weather_map,
                 end,
                 frigate_end,
-                resolution_nm=self.config.success_grid_resolution_nm,
+                maximum_distance_nm=self.config.success_distance_nm,
             ):
                 outcome = "success"
                 terminated = True
@@ -293,7 +296,15 @@ class ReturnEnv(gym.Env):
             outcome = "timeout"
             truncated = True
 
-        current_distance = math.dist(end, frigate_end)
+        proximity_bonus = 0.0
+        newly_reached_thresholds: tuple[float, ...] = ()
+        if outcome not in {"storm_collision", "out_of_bounds"}:
+            proximity_bonus, newly_reached_thresholds = newly_reached_proximity_bonus(
+                self.config.reward,
+                current_distance,
+                self._reached_proximity_thresholds_nm,
+            )
+            self._reached_proximity_thresholds_nm.update(newly_reached_thresholds)
         reward = calculate_reward(
             self.config.reward,
             previous_distance_nm=previous_distance,
@@ -301,6 +312,7 @@ class ReturnEnv(gym.Env):
             waited=not moving,
             speed_switched=speed_switched,
             outcome=outcome,
+            proximity_bonus=proximity_bonus,
         )
         self._previous_moving = moving
         self._done = terminated or truncated
@@ -310,6 +322,8 @@ class ReturnEnv(gym.Env):
             "outcome": outcome,
             "elapsed_seconds": self.elapsed_seconds,
             "distance_to_frigate_nm": current_distance,
+            "proximity_bonus": proximity_bonus,
+            "newly_reached_proximity_thresholds_nm": newly_reached_thresholds,
             "weather_updated": weather_updated,
             "helicopter_position_nm": end,
             "frigate_position_nm": frigate_end,

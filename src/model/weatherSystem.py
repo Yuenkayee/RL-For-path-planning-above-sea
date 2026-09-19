@@ -188,7 +188,7 @@ class SimulationParameters:
     time_step_minutes: float = 1.0
     total_time_minutes: float = 60.0
     helicopter_initial_nm: tuple[float, float] = (5.0, 5.0)
-    frigate_initial_nm: tuple[float, float] = (45.0, 45.0)
+    frigate_initial_nm: tuple[float, float] = (20.0, 20.0)
     random_seed: int | None = 20260917
 
     def __post_init__(self) -> None:

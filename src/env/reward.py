@@ -16,6 +16,10 @@ class RewardWeights:
     wait: float = -0.01
     speed_switch: float = -0.005
     progress: float = 1.0
+    proximity_5_nm: float = 5.0
+    proximity_2_nm: float = 10.0
+    proximity_1_nm: float = 20.0
+    proximity_0_5_nm: float = 40.0
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, float]) -> RewardWeights:
@@ -34,8 +38,13 @@ def calculate_reward(
     waited: bool,
     speed_switched: bool,
     outcome: str | None,
+    proximity_bonus: float = 0.0,
 ) -> float:
-    reward = weights.step + weights.progress * (previous_distance_nm - current_distance_nm)
+    reward = (
+        weights.step
+        + weights.progress * (previous_distance_nm - current_distance_nm)
+        + proximity_bonus
+    )
     if waited:
         reward += weights.wait
     if speed_switched:
@@ -51,4 +60,31 @@ def calculate_reward(
     return reward
 
 
-__all__ = ["RewardWeights", "calculate_reward"]
+_PROXIMITY_REWARDS = (
+    (5.0, "proximity_5_nm"),
+    (2.0, "proximity_2_nm"),
+    (1.0, "proximity_1_nm"),
+    (0.5, "proximity_0_5_nm"),
+)
+
+
+def newly_reached_proximity_bonus(
+    weights: RewardWeights,
+    current_distance_nm: float,
+    previously_reached_nm: set[float] | frozenset[float],
+) -> tuple[float, tuple[float, ...]]:
+    """Return one-time bonuses for distance bands first reached on this step."""
+    reached = tuple(
+        threshold
+        for threshold, _ in _PROXIMITY_REWARDS
+        if current_distance_nm <= threshold and threshold not in previously_reached_nm
+    )
+    bonus = sum(
+        getattr(weights, field_name)
+        for threshold, field_name in _PROXIMITY_REWARDS
+        if threshold in reached
+    )
+    return bonus, reached
+
+
+__all__ = ["RewardWeights", "calculate_reward", "newly_reached_proximity_bonus"]

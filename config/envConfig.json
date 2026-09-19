@@ -5,8 +5,8 @@
   "heading_count": 16,
   "helicopter_speed_knots": [0.0, 100.0],
   "frigate_speed_knots": 30.0,
-  "frigate_heading_choices_deg": [315.0, 0.0, 45.0, 90.0, 135.0],
-  "success_grid_resolution_nm": 0.1,
+  "frigate_heading_choices_deg": [45.0],
+  "success_distance_nm": 1.0,
   "storm_safety_margin_nm": 0.1,
   "weather_history_frames": 6,
   "reward": {
@@ -16,6 +16,10 @@
     "timeout": -100.0,
     "step": -0.02,
     "wait": -0.01,
-    "speed_switch": -0.005
+    "speed_switch": -0.005,
+    "proximity_5_nm": 5.0,
+    "proximity_2_nm": 10.0,
+    "proximity_1_nm": 20.0,
+    "proximity_0_5_nm": 40.0
   }
 }

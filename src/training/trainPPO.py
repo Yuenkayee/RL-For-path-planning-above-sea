@@ -21,30 +21,53 @@ from model.weatherSystem import SimulationParameters
 
 from .checkpoint import save_checkpoint
 from .config import load_algorithm_config
+from .curriculum import DEFAULT_CURRICULUM, parameters_for_stage, stage_for_episode
 
 
 class _EpisodeSequenceEnv(gym.Wrapper):
-    """Assign deterministic episode seeds to one vector worker."""
+    """Assign deterministic episode ids, seeds and curriculum stages to a worker."""
 
-    def __init__(self, env: ReturnEnv, episode_seeds: Sequence[int]) -> None:
-        if not episode_seeds:
-            raise ValueError("each worker must receive at least one episode seed")
+    def __init__(
+        self,
+        env: ReturnEnv,
+        episode_ids: Sequence[int],
+        *,
+        total_episodes: int,
+        base_seed: int,
+        base_weather_parameters: SimulationParameters,
+        use_curriculum: bool,
+    ) -> None:
+        if not episode_ids:
+            raise ValueError("each worker must receive at least one episode id")
         super().__init__(env)
-        self._episode_seeds = tuple(int(seed) for seed in episode_seeds)
+        self._episode_ids = tuple(int(episode_id) for episode_id in episode_ids)
+        self._total_episodes = total_episodes
+        self._base_seed = base_seed
+        self._base_weather_parameters = base_weather_parameters
+        self._use_curriculum = use_curriculum
         self._seed_cursor = 0
         self._active = False
         self._last_observation: dict[str, Any] | None = None
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         del seed
-        if self._seed_cursor >= len(self._episode_seeds):
+        if self._seed_cursor >= len(self._episode_ids):
             self._active = False
             if self._last_observation is None:
                 raise RuntimeError("worker became inactive before its first reset")
             return self._last_observation, {"inactive": True}
-        episode_seed = self._episode_seeds[self._seed_cursor]
+        episode_id = self._episode_ids[self._seed_cursor]
         self._seed_cursor += 1
+        stage = stage_for_episode(episode_id, self._total_episodes)
+        self.env._base_weather_parameters = (
+            parameters_for_stage(self._base_weather_parameters, stage)
+            if self._use_curriculum
+            else self._base_weather_parameters
+        )
+        episode_seed = self._base_seed + episode_id
         observation, info = self.env.reset(seed=episode_seed, options=options)
+        info["episode_id"] = episode_id
+        info["curriculum_stage"] = stage.name if self._use_curriculum else "disabled"
         self._last_observation = observation
         self._active = True
         return observation, info
@@ -60,10 +83,18 @@ class _EpisodeSequenceEnv(gym.Wrapper):
 def _make_episode_environment(
     env_config: EnvironmentConfig,
     weather_parameters: SimulationParameters,
-    episode_seeds: tuple[int, ...],
+    episode_ids: tuple[int, ...],
+    total_episodes: int,
+    base_seed: int,
+    use_curriculum: bool,
 ) -> _EpisodeSequenceEnv:
     return _EpisodeSequenceEnv(
-        ReturnEnv(env_config, weather_parameters=weather_parameters), episode_seeds
+        ReturnEnv(env_config, weather_parameters=weather_parameters),
+        episode_ids,
+        total_episodes=total_episodes,
+        base_seed=base_seed,
+        base_weather_parameters=weather_parameters,
+        use_curriculum=use_curriculum,
     )
 
 
@@ -102,15 +133,16 @@ def _final_info_at(infos: dict[str, Any], index: int) -> dict[str, Any]:
 
 def _flush_ordered_episode_metrics(
     writer: SummaryWriter,
-    pending: dict[int, tuple[float, int, bool]],
+    pending: dict[int, tuple[float, int, bool, int]],
     next_episode_id: int,
 ) -> int:
     """Write all contiguous completed episodes in episode-id order."""
     while next_episode_id in pending:
-        reward, steps, succeeded = pending.pop(next_episode_id)
+        reward, steps, succeeded, curriculum_stage = pending.pop(next_episode_id)
         writer.add_scalar("episode/reward", reward, next_episode_id)
         writer.add_scalar("episode/steps", steps, next_episode_id)
         writer.add_scalar("episode/success", succeeded, next_episode_id)
+        writer.add_scalar("curriculum/stage", curriculum_stage, next_episode_id)
         next_episode_id += 1
     return next_episode_id
 
@@ -156,6 +188,7 @@ def train_ppo(
     device: str = "cpu",
     progress_interval_steps: int = 100,
     show_progress: bool = True,
+    use_curriculum: bool = True,
 ) -> tuple[PPOAgent, dict[str, float | str]]:
     """Train PPO with batched policy inference and parallel environments."""
     if episodes <= 0:
@@ -198,7 +231,10 @@ def train_ppo(
             _make_episode_environment,
             env.config,
             env._base_weather_parameters,
-            tuple(seed + episode_id for episode_id in episode_ids),
+            tuple(episode_ids),
+            episodes,
+            seed,
+            use_curriculum,
         )
         for episode_ids in episode_ids_by_worker
     ]
@@ -218,7 +254,7 @@ def train_ppo(
     episode_steps = [0] * worker_count
     episode_rewards = [0.0] * worker_count
     episode_started_at = [time.perf_counter()] * worker_count
-    pending_episode_metrics: dict[int, tuple[float, int, bool]] = {}
+    pending_episode_metrics: dict[int, tuple[float, int, bool, int]] = {}
     next_episode_to_log = 0
     maximum_progress_steps = max_steps_per_episode or round(
         env.config.maximum_episode_minutes * 60.0 / env.config.control_step_seconds
@@ -232,9 +268,12 @@ def train_ppo(
         )
         for worker, episode_ids in enumerate(episode_ids_by_worker):
             episode_id = episode_ids[0]
+            curriculum_name = (
+                stage_for_episode(episode_id, episodes).name if use_curriculum else "disabled"
+            )
             print(
                 f"[PPO] episode {episode_id + 1}/{episodes} started "
-                f"(worker={worker}, seed={seed + episode_id})",
+                f"(worker={worker}, seed={seed + episode_id}, curriculum={curriculum_name})",
                 flush=True,
             )
 
@@ -308,10 +347,16 @@ def train_ppo(
                 completed_episodes += 1
                 elapsed = time.perf_counter() - episode_started_at[worker]
                 if writer is not None:
+                    curriculum_stage = (
+                        DEFAULT_CURRICULUM.index(stage_for_episode(episode_id, episodes))
+                        if use_curriculum
+                        else -1
+                    )
                     pending_episode_metrics[episode_id] = (
                         episode_rewards[worker],
                         episode_steps[worker],
                         outcome == "success",
+                        curriculum_stage,
                     )
                     next_episode_to_log = _flush_ordered_episode_metrics(
                         writer,
@@ -336,9 +381,15 @@ def train_ppo(
                     and episode_positions[worker] < len(episode_ids_by_worker[worker])
                 ):
                     next_episode_id = episode_ids_by_worker[worker][episode_positions[worker]]
+                    curriculum_name = (
+                        stage_for_episode(next_episode_id, episodes).name
+                        if use_curriculum
+                        else "disabled"
+                    )
                     print(
                         f"[PPO] episode {next_episode_id + 1}/{episodes} started "
-                        f"(worker={worker}, seed={seed + next_episode_id})",
+                        f"(worker={worker}, seed={seed + next_episode_id}, "
+                        f"curriculum={curriculum_name})",
                         flush=True,
                     )
 
@@ -408,6 +459,7 @@ def train_ppo(
         "updates": float(update_count),
         "num_envs": float(worker_count),
         "device": selected_device,
+        "curriculum": "enabled" if use_curriculum else "disabled",
     }
     if checkpoint_path is not None:
         save_checkpoint(agent, checkpoint_path, metadata=metrics)

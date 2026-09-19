@@ -65,7 +65,7 @@ def make_success_environment() -> ReturnEnv:
         EnvironmentConfig(
             maximum_episode_minutes=2.0,
             frigate_heading_choices_deg=(0.0,),
-            success_grid_resolution_nm=10.0,
+            success_distance_nm=10.0,
             weather_history_frames=2,
         ),
         weather_parameters=parameters,
@@ -130,6 +130,8 @@ class AlgorithmTests(unittest.TestCase):
         self.assertEqual(metrics["steps"], 3.0)
         self.assertEqual(metrics["num_envs"], 2.0)
         self.assertEqual(metrics["success_rate"], 1.0)
+        self.assertEqual(metrics["curriculum"], "enabled")
+        self.assertIn("curriculum=interception_only", output.getvalue())
         completed_lines = [
             line
             for line in output.getvalue().splitlines()
@@ -140,19 +142,22 @@ class AlgorithmTests(unittest.TestCase):
     def test_parallel_episode_metrics_are_flushed_in_episode_order(self) -> None:
         writer = _RecordingWriter()
         pending = {
-            2: (12.0, 30, True),
-            0: (-5.0, 20, False),
+            2: (12.0, 30, True, 1),
+            0: (-5.0, 20, False, 0),
         }
         next_episode = _flush_ordered_episode_metrics(writer, pending, 0)  # type: ignore[arg-type]
         self.assertEqual(next_episode, 1)
         self.assertEqual({call[2] for call in writer.calls}, {0})
 
-        pending[1] = (3.0, 25, True)
+        pending[1] = (3.0, 25, True, 0)
         next_episode = _flush_ordered_episode_metrics(  # type: ignore[arg-type]
             writer, pending, next_episode
         )
         self.assertEqual(next_episode, 3)
-        self.assertEqual([call[2] for call in writer.calls], [0, 0, 0, 1, 1, 1, 2, 2, 2])
+        self.assertEqual(
+            [call[2] for call in writer.calls],
+            [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2],
+        )
         self.assertFalse(pending)
 
     def test_dqn_updates_from_replay(self) -> None:

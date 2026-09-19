@@ -13,7 +13,12 @@ from env.returnEnv import ReturnEnv
 from experiment import EXPERIMENT_GROUPS
 from inference.episodeVisualization import run_episode_trace, save_episode_visualization
 from model.weatherSystem import SimulationParameters, WeatherParameters
-from training.curriculum import DEFAULT_CURRICULUM, stage_for_progress
+from training.curriculum import (
+    DEFAULT_CURRICULUM,
+    parameters_for_stage,
+    stage_for_episode,
+    stage_for_progress,
+)
 from training.evaluator import evaluate_policy, save_evaluation_plot
 
 
@@ -53,6 +58,28 @@ class ExperimentAndEvaluationTests(unittest.TestCase):
     def test_curriculum_boundaries(self) -> None:
         self.assertEqual(stage_for_progress(0.0), DEFAULT_CURRICULUM[0])
         self.assertEqual(stage_for_progress(1.0), DEFAULT_CURRICULUM[-1])
+        self.assertEqual(DEFAULT_CURRICULUM[-1].storm_area_scale, 1.5)
+        expected = [
+            DEFAULT_CURRICULUM[0],
+            DEFAULT_CURRICULUM[1],
+            DEFAULT_CURRICULUM[2],
+            DEFAULT_CURRICULUM[3],
+            DEFAULT_CURRICULUM[3],
+        ]
+        actual = [stage_for_episode(index, 1000) for index in (0, 250, 500, 750, 999)]
+        self.assertEqual(actual, expected)
+
+    def test_curriculum_stage_changes_weather_parameters(self) -> None:
+        base = SimulationParameters.from_json()
+        static = parameters_for_stage(base, DEFAULT_CURRICULUM[1]).weather
+        dense = parameters_for_stage(base, DEFAULT_CURRICULUM[3]).weather
+
+        self.assertEqual((static.initial_storm_count, static.maximum_storm_count), (2, 2))
+        self.assertEqual(static.storm_motion_speed_knots, 0.0)
+        self.assertEqual(static.storm_area_scale_range, (0.8, 0.8))
+        self.assertEqual((dense.initial_storm_count, dense.maximum_storm_count), (5, 8))
+        self.assertEqual(dense.storm_motion_speed_knots, base.weather.storm_motion_speed_knots)
+        self.assertEqual(dense.storm_area_scale_range, (1.5, 1.5))
 
     def test_seed_matched_evaluator(self) -> None:
         result = evaluate_policy(_easy_environment, _WaitPolicy(), seeds=(1, 2))

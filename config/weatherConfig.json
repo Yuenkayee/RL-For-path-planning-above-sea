@@ -7,7 +7,7 @@
   "time_step_minutes": 1.0,
   "total_time_minutes": 120.0,
   "helicopter_initial_nm": [5.0, 5.0],
-  "frigate_initial_nm": [30.0, 30.0],
+  "frigate_initial_nm": [20.0, 20.0],
   "random_seed": 2023390,
   "weather": {
     "sea_state_code": 8,

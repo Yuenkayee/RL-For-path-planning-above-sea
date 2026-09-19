@@ -37,9 +37,9 @@ def successful_rendezvous(
     helicopter_nm: tuple[float, float],
     frigate_nm: tuple[float, float],
     *,
-    resolution_nm: float,
+    maximum_distance_nm: float,
 ) -> bool:
-    if not same_cell(helicopter_nm, frigate_nm, resolution_nm):
+    if math.dist(helicopter_nm, frigate_nm) > maximum_distance_nm:
         return False
     return weather_map.weather_at(*helicopter_nm) == FREE
 

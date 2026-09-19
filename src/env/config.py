@@ -23,8 +23,8 @@ class EnvironmentConfig:
     heading_count: int = 16
     helicopter_speed_knots: tuple[float, float] = (0.0, 100.0)
     frigate_speed_knots: float = 30.0
-    frigate_heading_choices_deg: tuple[float, ...] = (315.0, 0.0, 45.0, 90.0, 135.0)
-    success_grid_resolution_nm: float = 0.1
+    frigate_heading_choices_deg: tuple[float, ...] = (45.0,)
+    success_distance_nm: float = 1.0
     storm_safety_margin_nm: float = 0.1
     weather_history_frames: int = 6
     reward: RewardWeights = RewardWeights()
@@ -35,7 +35,7 @@ class EnvironmentConfig:
             self.weather_step_seconds,
             self.maximum_episode_minutes,
             self.frigate_speed_knots,
-            self.success_grid_resolution_nm,
+            self.success_distance_nm,
         )
         if any(not math.isfinite(item) or item <= 0 for item in positive):
             raise ValueError("time, speed and resolution values must be positive")
@@ -70,9 +70,20 @@ class EnvironmentConfig:
     def flight_speed_knots(self) -> float:
         return self.helicopter_speed_knots[1]
 
+    @property
+    def success_grid_resolution_nm(self) -> float:
+        """Backward-compatible alias for the rendezvous distance threshold."""
+        return self.success_distance_nm
+
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> EnvironmentConfig:
         data = dict(values)
+        if "success_grid_resolution_nm" in data:
+            if "success_distance_nm" in data:
+                raise ValueError(
+                    "use only success_distance_nm, not success_grid_resolution_nm as well"
+                )
+            data["success_distance_nm"] = data.pop("success_grid_resolution_nm")
         if "helicopter_speed_knots" in data:
             speeds = data["helicopter_speed_knots"]
             if not isinstance(speeds, (list, tuple)) or len(speeds) != 2:

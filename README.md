@@ -25,7 +25,7 @@
 - 天气仿真 GIF 演示；
 - 直升机两档速度和护卫舰匀速直线运动的数据模型。
 - 6秒控制步与60秒天气步的统一返场环境；
-- 等待加16航向动作、扫掠碰撞检测、动作掩码和0.1海里进场判定；
+- 等待加16航向动作、扫掠碰撞检测、动作掩码和1.0海里进场判定；
 - 截获预测、引导图、SIPP和时空A*；
 - 基于PyTorch双分辨率CNN的Masked PPO、Dueling Double DQN和离散SAC；
 - Gymnasium标准动作空间、观测空间和环境接口；
@@ -45,7 +45,7 @@ python3 src/test/weatherDemo.py
 ## 训练与评估
 
 ```bash
-uv run python scripts/train_ppo.py --episodes 10 --max-steps 1200
+uv run python scripts/train_ppo.py --episodes 5000 --max-steps 1200
 uv run python scripts/train_dqn.py --episodes 10 --max-steps 1200
 uv run python scripts/train_sac.py --episodes 10 --max-steps 1200
 
@@ -96,7 +96,11 @@ Ubuntu 22.04训练服务器可以直接配置已有的 Python 3.11–3.13 环境
 PPO默认并行运行4个环境，自动选择CUDA、Apple MPS或CPU，并每100步输出各episode进度：
 
 ```bash
-python scripts/train_ppo.py --episodes 1000 --max-steps 1200 --num-envs 8 --device auto
+python scripts/train_ppo.py --episodes 5000 --max-steps 1200 --num-envs 8 --device auto
 ```
+
+PPO 默认启用四阶段课程学习，按全局 episode 编号依次使用无雷雨、静态雷雨、
+移动雷雨和稠密动态雷雨。消融实验可添加 `--no-curriculum` 关闭。护卫舰默认从
+`(20, 20)` 海里出发并始终以 `45°` 向东北航行。
 
 依赖与建议安装方式见 [requirements.md](requirements.md)。

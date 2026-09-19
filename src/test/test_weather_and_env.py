@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from env.actionMask import build_action_mask
 from env.config import EnvironmentConfig
 from env.returnEnv import ReturnEnv
+from env.reward import RewardWeights, newly_reached_proximity_bonus
+from env.termination import successful_rendezvous
 from model.weatherMap import THUNDERSTORM, WeatherMap
 from model.weatherSystem import SimulationParameters, WeatherParameters, WeatherSystem
 
@@ -36,14 +38,51 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
         weather_parameters = SimulationParameters.from_json()
 
         self.assertEqual(env_config.helicopter_speed_knots, (0.0, 100.0))
-        self.assertEqual(
-            env_config.frigate_heading_choices_deg,
-            (315.0, 0.0, 45.0, 90.0, 135.0),
-        )
+        self.assertEqual(env_config.frigate_heading_choices_deg, (45.0,))
+        self.assertEqual(env_config.success_distance_nm, 1.0)
         self.assertEqual(weather_parameters.map_size_nm, (80.0, 80.0))
+        self.assertEqual(weather_parameters.frigate_initial_nm, (20.0, 20.0))
         self.assertEqual(weather_parameters.weather.initial_storm_count, 8)
         self.assertEqual(weather_parameters.weather.maximum_storm_count, 12)
         self.assertEqual(weather_parameters.weather.storm_area_scale_range, (1.0, 1.5))
+
+    def test_rendezvous_uses_one_nautical_mile_distance_not_grid_alignment(self) -> None:
+        weather_map = WeatherMap(area_size_nm=(10.0, 10.0), local_origin_nm=(0.0, 0.0))
+        self.assertTrue(
+            successful_rendezvous(
+                weather_map,
+                (0.95, 0.5),
+                (1.05, 0.5),
+                maximum_distance_nm=1.0,
+            )
+        )
+        self.assertFalse(
+            successful_rendezvous(
+                weather_map,
+                (0.5, 0.5),
+                (1.6, 0.5),
+                maximum_distance_nm=1.0,
+            )
+        )
+
+    def test_legacy_success_resolution_config_maps_to_distance(self) -> None:
+        config = EnvironmentConfig.from_mapping({"success_grid_resolution_nm": 0.75})
+        self.assertEqual(config.success_distance_nm, 0.75)
+        self.assertEqual(config.success_grid_resolution_nm, 0.75)
+
+    def test_proximity_rewards_are_awarded_once_per_threshold(self) -> None:
+        weights = RewardWeights()
+        reached: set[float] = set()
+
+        bonus, newly_reached = newly_reached_proximity_bonus(weights, 4.0, reached)
+        self.assertEqual((bonus, newly_reached), (5.0, (5.0,)))
+        reached.update(newly_reached)
+
+        bonus, newly_reached = newly_reached_proximity_bonus(weights, 4.5, reached)
+        self.assertEqual((bonus, newly_reached), (0, ()))
+
+        bonus, newly_reached = newly_reached_proximity_bonus(weights, 0.4, reached)
+        self.assertEqual((bonus, newly_reached), (70.0, (2.0, 1.0, 0.5)))
 
     def test_local_grid_reference_survives_window_move(self) -> None:
         system = WeatherSystem(clear_weather_parameters())
