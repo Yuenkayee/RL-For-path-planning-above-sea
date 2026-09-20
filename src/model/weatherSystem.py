@@ -35,6 +35,8 @@ from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 try:  # Package import: ``from model.weatherSystem import WeatherSystem``.
     from .weatherMap import FREE, THUNDERSTORM, WeatherMap, WeatherMapSnapshot
 except ImportError:  # Direct execution from the ``src/model`` directory.
@@ -512,9 +514,14 @@ class WeatherSystem:
             and cell.center_y_nm - margin <= height
         )
 
-    def _contains_storm(self, x_nm: float, y_nm: float) -> bool:
+    def _contains_storm(
+        self,
+        x_nm: float,
+        y_nm: float,
+        cells: tuple[StormCell, ...] | list[StormCell] | None = None,
+    ) -> bool:
         irregularity = self.parameters.weather.shape_irregularity
-        for cell in self._cells:
+        for cell in self._cells if cells is None else cells:
             scale = cell.scale
             if scale <= 0:
                 continue
@@ -542,6 +549,7 @@ class WeatherSystem:
         origin_nm: tuple[float, float],
         resolution_nm: float,
         shape: tuple[int, int],
+        cells: tuple[StormCell, ...] | list[StormCell] | None = None,
     ) -> list[list[int]]:
         origin_x, origin_y = origin_nm
         height, width = shape
@@ -554,12 +562,85 @@ class WeatherSystem:
                     if self._contains_storm(
                         origin_x + (column + 0.5) * resolution_nm,
                         y,
+                        cells,
                     )
                     else FREE
                     for column in range(width)
                 ]
             )
         return rows
+
+    def forecast_snapshots(
+        self,
+        horizon_steps: int,
+        *,
+        step_minutes: float = 1.0,
+    ) -> tuple[WeatherMapSnapshot, ...]:
+        """Nowcast occupancy without mutating the live stochastic simulation.
+
+        Active cells are advected with their currently estimated velocity and
+        continue through the configured lifecycle envelope. Random motion
+        perturbations and future cell births are intentionally omitted: they
+        are unknowable at decision time and are handled by frequent replanning.
+        """
+        if horizon_steps < 0:
+            raise ValueError("horizon_steps must be non-negative")
+        if not math.isfinite(step_minutes) or step_minutes <= 0:
+            raise ValueError("step_minutes must be positive and finite")
+        current = self.weather_map.snapshot()
+        result: list[WeatherMapSnapshot] = []
+        source_cells = self.cells
+        height, width = len(current.global_grid), len(current.global_grid[0])
+        x_coordinates = (
+            np.arange(width, dtype=np.float64) + 0.5
+        ) * current.global_resolution_nm
+        y_coordinates = (
+            np.arange(height, dtype=np.float64) + 0.5
+        ) * current.global_resolution_nm
+        x_grid, y_grid = np.meshgrid(x_coordinates, y_coordinates)
+        irregularity = self.parameters.weather.shape_irregularity
+        for time_step in range(horizon_steps + 1):
+            elapsed_minutes = time_step * step_minutes
+            projected: list[StormCell] = []
+            for source in source_cells:
+                cell = replace(source)
+                heading_rad = math.radians(cell.heading_deg)
+                distance_nm = cell.speed_knots * elapsed_minutes / 60.0
+                cell.center_x_nm += distance_nm * math.sin(heading_rad)
+                cell.center_y_nm += distance_nm * math.cos(heading_rad)
+                cell.age_minutes += elapsed_minutes
+                if self._cell_is_active(cell):
+                    projected.append(cell)
+            occupied = np.zeros((height, width), dtype=np.bool_)
+            for cell in projected:
+                scale = cell.scale
+                if scale <= 0:
+                    continue
+                dx = x_grid - cell.center_x_nm
+                dy = y_grid - cell.center_y_nm
+                cosine = math.cos(cell.orientation_rad)
+                sine = math.sin(cell.orientation_rad)
+                local_x = cosine * dx + sine * dy
+                local_y = -sine * dx + cosine * dy
+                major = cell.major_radius_nm * scale
+                minor = cell.minor_radius_nm * scale
+                normalized_radius = np.hypot(local_x / major, local_y / minor)
+                angle = np.arctan2(local_y / minor, local_x / major)
+                boundary = 1.0 + irregularity * (
+                    0.65 * np.sin(3.0 * angle + cell.phase_one)
+                    + 0.35 * np.sin(5.0 * angle + cell.phase_two)
+                )
+                occupied |= normalized_radius <= boundary
+            global_grid = tuple(
+                tuple(row) for row in occupied.astype(np.uint8).tolist()
+            )
+            result.append(
+                replace(
+                    current,
+                    global_grid=global_grid,
+                )
+            )
+        return tuple(result)
 
     def _render_to_map(self, *, protect_initial_positions: bool = False) -> None:
         global_values = self._rasterize(

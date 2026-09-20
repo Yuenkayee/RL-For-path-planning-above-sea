@@ -77,9 +77,9 @@ class ExperimentAndEvaluationTests(unittest.TestCase):
         self.assertEqual((static.initial_storm_count, static.maximum_storm_count), (2, 2))
         self.assertEqual(static.storm_motion_speed_knots, 0.0)
         self.assertEqual(static.storm_area_scale_range, (0.8, 0.8))
-        self.assertEqual((dense.initial_storm_count, dense.maximum_storm_count), (5, 8))
+        self.assertEqual((dense.initial_storm_count, dense.maximum_storm_count), (8, 12))
         self.assertEqual(dense.storm_motion_speed_knots, base.weather.storm_motion_speed_knots)
-        self.assertEqual(dense.storm_area_scale_range, (1.5, 1.5))
+        self.assertEqual(dense.storm_area_scale_range, (1.0, 1.5))
 
     def test_seed_matched_evaluator(self) -> None:
         result = evaluate_policy(_easy_environment, _WaitPolicy(), seeds=(1, 2))

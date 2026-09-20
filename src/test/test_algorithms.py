@@ -20,7 +20,7 @@ from env.config import EnvironmentConfig
 from env.returnEnv import ReturnEnv
 from model.weatherSystem import SimulationParameters, WeatherParameters
 from training.checkpoint import load_checkpoint, save_checkpoint
-from training.trainPPO import _flush_ordered_episode_metrics, train_ppo
+from training.trainPPO import _episode_seed, _flush_ordered_episode_metrics, train_ppo
 
 
 class _RecordingWriter:
@@ -138,6 +138,13 @@ class AlgorithmTests(unittest.TestCase):
             if line.startswith("[PPO] episode") and " complete " in line
         ]
         self.assertEqual(len(completed_lines), 3)
+
+    def test_hard_seed_replay_is_deterministic(self) -> None:
+        first = [_episode_seed(index, 10, (1, 4, 6), 1.0) for index in range(6)]
+        second = [_episode_seed(index, 10, (1, 4, 6), 1.0) for index in range(6)]
+        self.assertEqual(first, second)
+        self.assertTrue(all(replayed for _, replayed in first))
+        self.assertTrue(all(seed in {1, 4, 6} for seed, _ in first))
 
     def test_parallel_episode_metrics_are_flushed_in_episode_order(self) -> None:
         writer = _RecordingWriter()

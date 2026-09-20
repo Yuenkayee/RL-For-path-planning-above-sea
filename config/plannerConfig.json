@@ -1,9 +1,10 @@
 {
-  "planning_horizon_minutes": 20.0,
-  "replanning_interval_seconds": 60.0,
+  "planning_horizon_minutes": 90.0,
+  "planning_step_seconds": 60.0,
+  "replanning_interval_seconds": 12.0,
+  "lookahead_distance_nm": 3.0,
   "allow_wait": true,
   "wait_speed_knots": 0.0,
-  "flight_speed_knots": 50.0,
-  "heading_count": 16,
-  "weather_forecast_source": "history_extrapolation"
+  "flight_speed_knots": 100.0,
+  "weather_forecast_source": "constant_velocity_cells"
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import random
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -15,7 +16,7 @@ from gymnasium.vector import AsyncVectorEnv, AutoresetMode, SyncVectorEnv
 from torch.utils.tensorboard import SummaryWriter
 
 from algorithm.ppo import PPOAgent
-from env.config import EnvironmentConfig
+from env.config import EnvironmentConfig, PlannerConfig
 from env.returnEnv import ReturnEnv
 from model.weatherSystem import SimulationParameters
 
@@ -36,6 +37,8 @@ class _EpisodeSequenceEnv(gym.Wrapper):
         base_seed: int,
         base_weather_parameters: SimulationParameters,
         use_curriculum: bool,
+        hard_episode_seeds: tuple[int, ...],
+        hard_seed_replay_probability: float,
     ) -> None:
         if not episode_ids:
             raise ValueError("each worker must receive at least one episode id")
@@ -45,6 +48,8 @@ class _EpisodeSequenceEnv(gym.Wrapper):
         self._base_seed = base_seed
         self._base_weather_parameters = base_weather_parameters
         self._use_curriculum = use_curriculum
+        self._hard_episode_seeds = hard_episode_seeds
+        self._hard_seed_replay_probability = hard_seed_replay_probability
         self._seed_cursor = 0
         self._active = False
         self._last_observation: dict[str, Any] | None = None
@@ -64,10 +69,16 @@ class _EpisodeSequenceEnv(gym.Wrapper):
             if self._use_curriculum
             else self._base_weather_parameters
         )
-        episode_seed = self._base_seed + episode_id
+        episode_seed, hard_seed_replay = _episode_seed(
+            episode_id,
+            self._base_seed,
+            self._hard_episode_seeds,
+            self._hard_seed_replay_probability,
+        )
         observation, info = self.env.reset(seed=episode_seed, options=options)
         info["episode_id"] = episode_id
         info["curriculum_stage"] = stage.name if self._use_curriculum else "disabled"
+        info["hard_seed_replay"] = hard_seed_replay
         self._last_observation = observation
         self._active = True
         return observation, info
@@ -83,19 +94,42 @@ class _EpisodeSequenceEnv(gym.Wrapper):
 def _make_episode_environment(
     env_config: EnvironmentConfig,
     weather_parameters: SimulationParameters,
+    planner_config: PlannerConfig,
     episode_ids: tuple[int, ...],
     total_episodes: int,
     base_seed: int,
     use_curriculum: bool,
+    hard_episode_seeds: tuple[int, ...],
+    hard_seed_replay_probability: float,
 ) -> _EpisodeSequenceEnv:
     return _EpisodeSequenceEnv(
-        ReturnEnv(env_config, weather_parameters=weather_parameters),
+        ReturnEnv(
+            env_config,
+            planner_config=planner_config,
+            weather_parameters=weather_parameters,
+        ),
         episode_ids,
         total_episodes=total_episodes,
         base_seed=base_seed,
         base_weather_parameters=weather_parameters,
         use_curriculum=use_curriculum,
+        hard_episode_seeds=hard_episode_seeds,
+        hard_seed_replay_probability=hard_seed_replay_probability,
     )
+
+
+def _episode_seed(
+    episode_id: int,
+    base_seed: int,
+    hard_episode_seeds: tuple[int, ...],
+    replay_probability: float,
+) -> tuple[int, bool]:
+    """Return a deterministic mixture of fresh and known-difficult scenarios."""
+    rng = random.Random((base_seed + 1) * 1_000_003 + episode_id)
+    replay = bool(hard_episode_seeds) and rng.random() < replay_probability
+    if replay:
+        return rng.choice(hard_episode_seeds), True
+    return base_seed + episode_id, False
 
 
 def _split_observations(
@@ -201,6 +235,12 @@ def train_ppo(
         raise ValueError("progress_interval_steps must be positive")
 
     config = load_algorithm_config(config_path)
+    hard_episode_seeds = tuple(int(value) for value in config.pop("hard_episode_seeds", ()))
+    hard_seed_replay_probability = float(
+        config.pop("hard_seed_replay_probability", 0.0)
+    )
+    if not 0.0 <= hard_seed_replay_probability <= 1.0:
+        raise ValueError("hard_seed_replay_probability must lie in [0, 1]")
     rollout_steps = int(config["rollout_steps"])
     if rollout_steps <= 0:
         raise ValueError("rollout_steps must be positive")
@@ -231,10 +271,13 @@ def train_ppo(
             _make_episode_environment,
             env.config,
             env._base_weather_parameters,
+            env.planner_config,
             tuple(episode_ids),
             episodes,
             seed,
             use_curriculum,
+            hard_episode_seeds,
+            hard_seed_replay_probability,
         )
         for episode_ids in episode_ids_by_worker
     ]
@@ -268,12 +311,19 @@ def train_ppo(
         )
         for worker, episode_ids in enumerate(episode_ids_by_worker):
             episode_id = episode_ids[0]
+            episode_seed, hard_replay = _episode_seed(
+                episode_id,
+                seed,
+                hard_episode_seeds,
+                hard_seed_replay_probability,
+            )
             curriculum_name = (
                 stage_for_episode(episode_id, episodes).name if use_curriculum else "disabled"
             )
             print(
                 f"[PPO] episode {episode_id + 1}/{episodes} started "
-                f"(worker={worker}, seed={seed + episode_id}, curriculum={curriculum_name})",
+                f"(worker={worker}, seed={episode_seed}, curriculum={curriculum_name}, "
+                f"hard_replay={hard_replay})",
                 flush=True,
             )
 
@@ -381,6 +431,12 @@ def train_ppo(
                     and episode_positions[worker] < len(episode_ids_by_worker[worker])
                 ):
                     next_episode_id = episode_ids_by_worker[worker][episode_positions[worker]]
+                    next_seed, hard_replay = _episode_seed(
+                        next_episode_id,
+                        seed,
+                        hard_episode_seeds,
+                        hard_seed_replay_probability,
+                    )
                     curriculum_name = (
                         stage_for_episode(next_episode_id, episodes).name
                         if use_curriculum
@@ -388,8 +444,8 @@ def train_ppo(
                     )
                     print(
                         f"[PPO] episode {next_episode_id + 1}/{episodes} started "
-                        f"(worker={worker}, seed={seed + next_episode_id}, "
-                        f"curriculum={curriculum_name})",
+                        f"(worker={worker}, seed={next_seed}, "
+                        f"curriculum={curriculum_name}, hard_replay={hard_replay})",
                         flush=True,
                     )
 
@@ -460,6 +516,7 @@ def train_ppo(
         "num_envs": float(worker_count),
         "device": selected_device,
         "curriculum": "enabled" if use_curriculum else "disabled",
+        "hard_seed_replay_probability": hard_seed_replay_probability,
     }
     if checkpoint_path is not None:
         save_checkpoint(agent, checkpoint_path, metadata=metrics)

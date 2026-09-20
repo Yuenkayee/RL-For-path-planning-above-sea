@@ -12,22 +12,33 @@ class CurriculumStage:
     name: str
     initial_storm_count: int
     maximum_storm_count: int
-    storm_area_scale: float
+    storm_area_scale_range: tuple[float, float]
     moving_weather: bool
+
+    @property
+    def storm_area_scale(self) -> float:
+        """Compatibility value used by reports; returns the range maximum."""
+        return self.storm_area_scale_range[1]
 
 
 DEFAULT_CURRICULUM = (
-    CurriculumStage("interception_only", 0, 0, 1.0, False),
-    CurriculumStage("static_weather", 2, 2, 0.8, False),
-    CurriculumStage("moving_weather", 3, 5, 1.0, True),
-    CurriculumStage("dense_dynamic_weather", 5, 8, 1.5, True),
+    CurriculumStage("interception_only", 0, 0, (1.0, 1.0), False),
+    CurriculumStage("static_weather", 2, 2, (0.8, 0.8), False),
+    CurriculumStage("moving_weather", 4, 6, (1.0, 1.25), True),
+    CurriculumStage("full_dynamic_weather", 8, 12, (1.0, 1.5), True),
 )
+
+_STAGE_END_PROGRESS = (0.15, 0.35, 0.60, 1.0)
 
 
 def stage_for_progress(progress: float) -> CurriculumStage:
     bounded = min(1.0, max(0.0, progress))
-    index = min(len(DEFAULT_CURRICULUM) - 1, int(bounded * len(DEFAULT_CURRICULUM)))
-    return DEFAULT_CURRICULUM[index]
+    for stage, end_progress in zip(
+        DEFAULT_CURRICULUM, _STAGE_END_PROGRESS, strict=True
+    ):
+        if bounded < end_progress:
+            return stage
+    return DEFAULT_CURRICULUM[-1]
 
 
 def stage_for_episode(episode_id: int, total_episodes: int) -> CurriculumStage:
@@ -55,8 +66,8 @@ def parameters_for_stage(
         base_weather,
         initial_storm_count=initial_storm_count,
         maximum_storm_count=maximum_storm_count,
-        storm_area_scale=stage.storm_area_scale,
-        storm_area_scale_range=(stage.storm_area_scale, stage.storm_area_scale),
+        storm_area_scale=stage.storm_area_scale_range[0],
+        storm_area_scale_range=stage.storm_area_scale_range,
         storm_motion_speed_knots=motion_speed,
     )
     return replace(base, weather=weather)

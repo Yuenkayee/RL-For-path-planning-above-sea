@@ -213,11 +213,26 @@ class PPOAgent:
     def state_dict(self) -> dict:
         return {
             "algorithm": "ppo",
+            "action_count": self.network.action_count,
+            "action_semantics": "wait_plus_guidance_heading_residual_v1",
             "network": self.network.state_dict(),
             "optimizer": self.optimizer.state_dict(),
         }
 
     def load_state_dict(self, state: dict) -> None:
+        checkpoint_action_count = state.get("action_count")
+        if checkpoint_action_count is None:
+            actor_output = state.get("network", {}).get("actor.2.weight")
+            if actor_output is not None:
+                checkpoint_action_count = int(actor_output.shape[0])
+        if checkpoint_action_count is not None and checkpoint_action_count != self.network.action_count:
+            raise ValueError(
+                "checkpoint action space is incompatible with the residual PPO action space: "
+                f"checkpoint={checkpoint_action_count}, current={self.network.action_count}"
+            )
+        semantics = state.get("action_semantics")
+        if semantics not in {None, "wait_plus_guidance_heading_residual_v1"}:
+            raise ValueError(f"unsupported checkpoint action semantics: {semantics}")
         self.network.load_state_dict(state["network"])
         if "optimizer" in state:
             self.optimizer.load_state_dict(state["optimizer"])

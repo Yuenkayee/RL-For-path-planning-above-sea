@@ -53,8 +53,10 @@ class ClassicalPlannerController:
 
     def predict(self, observation: dict, *, deterministic: bool = True) -> tuple[int, dict]:
         del deterministic
-        snapshot = self.env.weather_map.snapshot()
-        frames = tuple(snapshot for _ in range(self.forecast_steps + 1))
+        frames = self.env.weather_system.forecast_snapshots(
+            self.forecast_steps,
+            step_minutes=float(getattr(self.planner, "step_seconds", 60.0)) / 60.0,
+        )
         angle = math.radians(self.env.frigate.heading_deg)
         velocity = (
             self.env.frigate.speed_knots * math.sin(angle),
@@ -87,8 +89,13 @@ class ClassicalPlannerController:
         if math.hypot(dx, dy) < 1e-9:
             return 0, {"plan": result}
         heading = math.degrees(math.atan2(dx, dy)) % 360.0
-        increment = 360.0 / self.env.config.heading_count
-        action = int(round(heading / increment)) % self.env.config.heading_count + 1
+        reference = self.env._reference_heading_deg()
+        offsets = self.env.config.residual_heading_offsets_deg
+        desired_residual = ((heading - reference + 180.0) % 360.0) - 180.0
+        action = min(
+            range(1, len(offsets) + 1),
+            key=lambda candidate: abs(offsets[candidate - 1] - desired_residual),
+        )
         if not observation["action_mask"][action]:
             valid_flight = [
                 index
@@ -97,9 +104,7 @@ class ClassicalPlannerController:
             ]
             action = min(
                 valid_flight,
-                key=lambda candidate: abs(
-                    (((candidate - 1) * increment - heading + 180.0) % 360.0) - 180.0
-                ),
+                key=lambda candidate: abs(offsets[candidate - 1] - desired_residual),
                 default=0,
             )
         return action, {"plan": result}

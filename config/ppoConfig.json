@@ -8,5 +8,7 @@
   "value_coefficient": 0.5,
   "rollout_steps": 2048,
   "batch_size": 64,
-  "update_epochs": 10
+  "update_epochs": 10,
+  "hard_seed_replay_probability": 0.2,
+  "hard_episode_seeds": [1, 4, 6]
 }

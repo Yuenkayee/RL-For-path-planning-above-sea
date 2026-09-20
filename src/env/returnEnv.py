@@ -17,10 +17,20 @@ from model.frigate import Frigate
 from model.helicopter import Helicopter
 from model.weatherSystem import DEFAULT_CONFIG_PATH, SimulationParameters, WeatherSystem
 from planner.guidanceMap import rasterize_guidance
+from planner.interceptPredictor import predict_intercept
 from planner.timeExpandedAStar import TimeExpandedAStarPlanner
 
-from .actionMask import build_action_mask, heading_for_action, segment_is_clear
-from .config import DEFAULT_ENV_CONFIG_PATH, EnvironmentConfig
+from .actionMask import (
+    build_residual_action_mask,
+    heading_for_residual_action,
+    segment_is_clear,
+)
+from .config import (
+    DEFAULT_ENV_CONFIG_PATH,
+    DEFAULT_PLANNER_CONFIG_PATH,
+    EnvironmentConfig,
+    PlannerConfig,
+)
 from .observation import build_observation
 from .reward import calculate_reward, newly_reached_proximity_bonus
 from .termination import inside_map, successful_rendezvous
@@ -30,8 +40,8 @@ class ReturnEnv(gym.Env):
     """Coordinate weather, vehicles, rewards and terminal conditions.
 
     The public ``reset`` and ``step`` signatures match Gymnasium closely, but
-    the project does not require Gymnasium to be installed. Action zero waits;
-    actions 1..N fly at cruise speed on evenly spaced absolute headings.
+    Action zero waits; actions 1..N fly at cruise speed with a configured
+    heading residual relative to the rolling global-planner guidance.
     """
 
     metadata = {"render_modes": []}
@@ -41,10 +51,23 @@ class ReturnEnv(gym.Env):
         env_config: EnvironmentConfig | None = None,
         *,
         env_config_path: str | Path = DEFAULT_ENV_CONFIG_PATH,
+        planner_config: PlannerConfig | None = None,
+        planner_config_path: str | Path = DEFAULT_PLANNER_CONFIG_PATH,
         weather_parameters: SimulationParameters | None = None,
         weather_config_path: str | Path = DEFAULT_CONFIG_PATH,
     ) -> None:
         self.config = env_config or EnvironmentConfig.from_json(env_config_path)
+        self.planner_config = planner_config or PlannerConfig.from_json(planner_config_path)
+        if not math.isclose(
+            self.planner_config.flight_speed_knots,
+            self.config.flight_speed_knots,
+            abs_tol=1e-9,
+        ) or not math.isclose(
+            self.planner_config.wait_speed_knots,
+            self.config.wait_speed_knots,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("planner and environment speed modes must match")
         self._base_weather_parameters = weather_parameters or SimulationParameters.from_json(
             weather_config_path
         )
@@ -93,15 +116,20 @@ class ReturnEnv(gym.Env):
         self.frigate: Frigate
         self.elapsed_seconds = 0.0
         self._weather_elapsed_seconds = 0.0
+        self._guidance_elapsed_seconds = 0.0
         self._previous_moving = False
         self._history: deque = deque(maxlen=self.config.weather_history_frames)
         self._guidance_planner = TimeExpandedAStarPlanner(
-            horizon_steps=30,
-            step_seconds=60.0,
+            horizon_steps=self.planner_config.horizon_steps,
+            step_seconds=self.planner_config.planning_step_seconds,
             helicopter_speed_knots=self.config.flight_speed_knots,
+            allow_wait=self.planner_config.allow_wait,
         )
         self._guidance_plan = None
         self._guidance_grid: tuple[tuple[float, ...], ...] | None = None
+        self._forecast_frames = ()
+        self._forecast_time_minutes: float | None = None
+        self._planner_potential = 0.0
         self._reached_proximity_thresholds_nm: set[float] = set()
         self._done = False
         self.reset()
@@ -142,14 +170,18 @@ class ReturnEnv(gym.Env):
         )
         self.elapsed_seconds = 0.0
         self._weather_elapsed_seconds = 0.0
+        self._guidance_elapsed_seconds = 0.0
         self._previous_moving = False
         self._reached_proximity_thresholds_nm.clear()
         self._done = False
         self._history.clear()
+        self._forecast_frames = ()
+        self._forecast_time_minutes = None
         snapshot = self.weather_map.snapshot()
         for _ in range(self.config.weather_history_frames):
             self._history.append(snapshot)
         self._refresh_guidance()
+        self._planner_potential = self._guidance_potential()
         return self._observation(), {
             "seed": parameters.random_seed,
             "episode_config": {
@@ -160,14 +192,19 @@ class ReturnEnv(gym.Env):
 
     def _refresh_guidance(self) -> None:
         snapshot = self.weather_map.snapshot()
-        frames = tuple(snapshot for _ in range(self._guidance_planner.horizon_steps + 1))
+        if self._forecast_time_minutes != self.weather_system.time_minutes:
+            self._forecast_frames = self.weather_system.forecast_snapshots(
+                self._guidance_planner.horizon_steps,
+                step_minutes=self._guidance_planner.step_seconds / 60.0,
+            )
+            self._forecast_time_minutes = self.weather_system.time_minutes
         heading_rad = math.radians(self.frigate.heading_deg)
         velocity = (
             self.frigate.speed_knots * math.sin(heading_rad),
             self.frigate.speed_knots * math.cos(heading_rad),
         )
         self._guidance_plan = self._guidance_planner.plan(
-            frames,
+            self._forecast_frames,
             (self.helicopter.x_nm, self.helicopter.y_nm),
             (self.frigate.x_nm, self.frigate.y_nm),
             velocity,
@@ -177,12 +214,77 @@ class ReturnEnv(gym.Env):
             shape=(len(snapshot.global_grid), len(snapshot.global_grid[0])),
             resolution_nm=snapshot.global_resolution_nm,
         )
+        self._guidance_elapsed_seconds = 0.0
+
+    def _frigate_velocity(self) -> tuple[float, float]:
+        heading_rad = math.radians(self.frigate.heading_deg)
+        return (
+            self.frigate.speed_knots * math.sin(heading_rad),
+            self.frigate.speed_knots * math.cos(heading_rad),
+        )
+
+    def _fallback_intercept_point(self) -> tuple[float, float]:
+        helicopter = (self.helicopter.x_nm, self.helicopter.y_nm)
+        frigate = (self.frigate.x_nm, self.frigate.y_nm)
+        intercept = predict_intercept(
+            helicopter,
+            frigate,
+            self._frigate_velocity(),
+            self.config.flight_speed_knots,
+        )
+        return intercept.point_nm if intercept is not None else frigate
+
+    def _lookahead_point(self) -> tuple[float, float]:
+        start = (self.helicopter.x_nm, self.helicopter.y_nm)
+        if self._guidance_plan is None or not self._guidance_plan.waypoints:
+            return self._fallback_intercept_point()
+        waypoints = self._guidance_plan.waypoints
+        distance = 0.0
+        previous = start
+        for waypoint in waypoints:
+            point = (waypoint.x_nm, waypoint.y_nm)
+            segment = math.dist(previous, point)
+            if distance + segment >= self.planner_config.lookahead_distance_nm:
+                remaining = self.planner_config.lookahead_distance_nm - distance
+                fraction = 0.0 if segment == 0.0 else remaining / segment
+                return (
+                    previous[0] + (point[0] - previous[0]) * fraction,
+                    previous[1] + (point[1] - previous[1]) * fraction,
+                )
+            distance += segment
+            previous = point
+        final = waypoints[-1]
+        return final.x_nm, final.y_nm
+
+    def _reference_heading_deg(self) -> float:
+        target = self._lookahead_point()
+        dx = target[0] - self.helicopter.x_nm
+        dy = target[1] - self.helicopter.y_nm
+        if math.hypot(dx, dy) < 1e-9:
+            return self.helicopter.heading_deg
+        return math.degrees(math.atan2(dx, dy)) % 360.0
+
+    def _guidance_potential(self) -> float:
+        """Negative estimated remaining route length for potential shaping."""
+        position = (self.helicopter.x_nm, self.helicopter.y_nm)
+        if self._guidance_plan is None or not self._guidance_plan.waypoints:
+            return -math.dist(position, self._fallback_intercept_point())
+        points = [(waypoint.x_nm, waypoint.y_nm) for waypoint in self._guidance_plan.waypoints]
+        suffix = [0.0] * len(points)
+        for index in range(len(points) - 2, -1, -1):
+            suffix[index] = suffix[index + 1] + math.dist(points[index], points[index + 1])
+        remaining = min(
+            math.dist(position, point) + suffix[index]
+            for index, point in enumerate(points)
+        )
+        return -remaining
 
     def get_action_mask(self) -> tuple[bool, ...]:
-        return build_action_mask(
+        return build_residual_action_mask(
             self.weather_map,
             (self.helicopter.x_nm, self.helicopter.y_nm),
-            heading_count=self.config.heading_count,
+            reference_heading_deg=self._reference_heading_deg(),
+            residual_offsets_deg=self.config.residual_heading_offsets_deg,
             flight_speed_knots=self.config.flight_speed_knots,
             wait_speed_knots=self.config.wait_speed_knots,
             duration_seconds=self.config.control_step_seconds,
@@ -190,27 +292,41 @@ class ReturnEnv(gym.Env):
         )
 
     def _observation(self) -> dict[str, Any]:
-        heading_rad = math.radians(self.frigate.heading_deg)
-        frigate_velocity = (
-            self.frigate.speed_knots * math.sin(heading_rad),
-            self.frigate.speed_knots * math.cos(heading_rad),
-        )
+        frigate_velocity = self._frigate_velocity()
         guidance_vector: tuple[float, ...] = ()
         if self._guidance_plan is not None and self._guidance_plan.waypoints:
-            next_index = min(1, len(self._guidance_plan.waypoints) - 1)
-            next_waypoint = self._guidance_plan.waypoints[next_index]
+            next_x, next_y = self._lookahead_point()
             final_waypoint = self._guidance_plan.waypoints[-1]
             width, height = self.weather_map.area_size_nm
             guidance_vector = (
-                (next_waypoint.x_nm - self.helicopter.x_nm) / width,
-                (next_waypoint.y_nm - self.helicopter.y_nm) / height,
-                final_waypoint.x_nm / width,
-                final_waypoint.y_nm / height,
+                (next_x - self.helicopter.x_nm) / width,
+                (next_y - self.helicopter.y_nm) / height,
+                (final_waypoint.x_nm - self.helicopter.x_nm) / width,
+                (final_waypoint.y_nm - self.helicopter.y_nm) / height,
                 final_waypoint.time_step / self._guidance_planner.horizon_steps,
                 1.0 if self._guidance_plan.reached_goal else 0.0,
             )
         else:
-            guidance_vector = (0.0,) * 6
+            target_x, target_y = self._fallback_intercept_point()
+            width, height = self.weather_map.area_size_nm
+            dx = (target_x - self.helicopter.x_nm) / width
+            dy = (target_y - self.helicopter.y_nm) / height
+            travel_minutes = (
+                math.dist(
+                    (self.helicopter.x_nm, self.helicopter.y_nm),
+                    (target_x, target_y),
+                )
+                / self.config.flight_speed_knots
+                * 60.0
+            )
+            guidance_vector = (
+                dx,
+                dy,
+                dx,
+                dy,
+                min(1.0, travel_minutes / self.planner_config.planning_horizon_minutes),
+                0.0,
+            )
         return build_observation(
             tuple(self._history),
             helicopter_nm=(self.helicopter.x_nm, self.helicopter.y_nm),
@@ -239,14 +355,21 @@ class ReturnEnv(gym.Env):
         start = (self.helicopter.x_nm, self.helicopter.y_nm)
         frigate_start = (self.frigate.x_nm, self.frigate.y_nm)
         previous_distance = math.dist(start, frigate_start)
+        previous_potential = self._planner_potential
         moving = action != 0
         speed_switched = moving != self._previous_moving
-        heading = heading_for_action(action, self.config.heading_count)
+        reference_heading = self._reference_heading_deg()
+        heading = heading_for_residual_action(
+            action,
+            reference_heading,
+            self.config.residual_heading_offsets_deg,
+        )
         self.helicopter.select_motion(moving=moving, heading_deg=heading)
         self.helicopter.step(dt)
         self.frigate.step(dt)
         self.elapsed_seconds += dt
         self._weather_elapsed_seconds += dt
+        self._guidance_elapsed_seconds += dt
 
         weather_updated = False
         while self._weather_elapsed_seconds + 1e-9 >= self.config.weather_step_seconds:
@@ -281,7 +404,14 @@ class ReturnEnv(gym.Env):
                 outcome = "success"
                 terminated = True
 
-        if weather_updated and not terminated:
+        if (
+            not terminated
+            and (
+                weather_updated
+                or self._guidance_elapsed_seconds + 1e-9
+                >= self.planner_config.replanning_interval_seconds
+            )
+        ):
             self._refresh_guidance()
 
         maximum_seconds = self.config.maximum_episode_minutes * 60.0
@@ -305,6 +435,10 @@ class ReturnEnv(gym.Env):
                 self._reached_proximity_thresholds_nm,
             )
             self._reached_proximity_thresholds_nm.update(newly_reached_thresholds)
+        current_potential = self._guidance_potential()
+        potential_shaping = (
+            self.config.potential_discount_factor * current_potential - previous_potential
+        )
         reward = calculate_reward(
             self.config.reward,
             previous_distance_nm=previous_distance,
@@ -313,7 +447,9 @@ class ReturnEnv(gym.Env):
             speed_switched=speed_switched,
             outcome=outcome,
             proximity_bonus=proximity_bonus,
+            potential_shaping=potential_shaping,
         )
+        self._planner_potential = current_potential
         self._previous_moving = moving
         self._done = terminated or truncated
         self._history.append(self.weather_map.snapshot())
@@ -328,6 +464,10 @@ class ReturnEnv(gym.Env):
             "helicopter_position_nm": end,
             "frigate_position_nm": frigate_end,
             "action_mask": observation["action_mask"],
+            "reference_heading_deg": reference_heading,
+            "executed_heading_deg": heading,
+            "planner_potential": current_potential,
+            "potential_shaping": potential_shaping,
         }
         return observation, reward, terminated, truncated, info
 

@@ -7,10 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from env.actionMask import build_action_mask
-from env.config import EnvironmentConfig
+from env.actionMask import build_action_mask, heading_for_residual_action
+from env.config import EnvironmentConfig, PlannerConfig
 from env.returnEnv import ReturnEnv
-from env.reward import RewardWeights, newly_reached_proximity_bonus
+from env.reward import RewardWeights, calculate_reward, newly_reached_proximity_bonus
 from env.termination import successful_rendezvous
 from model.weatherMap import THUNDERSTORM, WeatherMap
 from model.weatherSystem import SimulationParameters, WeatherParameters, WeatherSystem
@@ -38,13 +38,29 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
         weather_parameters = SimulationParameters.from_json()
 
         self.assertEqual(env_config.helicopter_speed_knots, (0.0, 100.0))
-        self.assertEqual(env_config.frigate_heading_choices_deg, (45.0,))
+        self.assertEqual(
+            env_config.frigate_heading_choices_deg,
+            (315.0, 0.0, 45.0, 90.0, 135.0),
+        )
+        self.assertEqual(env_config.action_count, 6)
         self.assertEqual(env_config.success_distance_nm, 1.0)
         self.assertEqual(weather_parameters.map_size_nm, (80.0, 80.0))
         self.assertEqual(weather_parameters.frigate_initial_nm, (20.0, 20.0))
         self.assertEqual(weather_parameters.weather.initial_storm_count, 8)
         self.assertEqual(weather_parameters.weather.maximum_storm_count, 12)
         self.assertEqual(weather_parameters.weather.storm_area_scale_range, (1.0, 1.5))
+
+    def test_residual_action_is_composed_with_planner_heading(self) -> None:
+        offsets = (-45.0, -22.5, 0.0, 22.5, 45.0)
+        self.assertIsNone(heading_for_residual_action(0, 225.0, offsets))
+        self.assertEqual(heading_for_residual_action(3, 225.0, offsets), 225.0)
+        self.assertEqual(heading_for_residual_action(5, 330.0, offsets), 15.0)
+
+    def test_planner_defaults_use_long_horizon_and_frequent_replanning(self) -> None:
+        config = PlannerConfig.from_json()
+        self.assertEqual(config.horizon_steps, 90)
+        self.assertEqual(config.replanning_interval_seconds, 12.0)
+        self.assertEqual(config.lookahead_distance_nm, 3.0)
 
     def test_rendezvous_uses_one_nautical_mile_distance_not_grid_alignment(self) -> None:
         weather_map = WeatherMap(area_size_nm=(10.0, 10.0), local_origin_nm=(0.0, 0.0))
@@ -83,6 +99,19 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
 
         bonus, newly_reached = newly_reached_proximity_bonus(weights, 0.4, reached)
         self.assertEqual((bonus, newly_reached), (70.0, (2.0, 1.0, 0.5)))
+
+    def test_planner_potential_shaping_is_added_to_reward(self) -> None:
+        weights = RewardWeights(step=0.0, progress=0.0, planner_potential=2.0)
+        reward = calculate_reward(
+            weights,
+            previous_distance_nm=10.0,
+            current_distance_nm=10.0,
+            waited=False,
+            speed_switched=False,
+            outcome=None,
+            potential_shaping=0.75,
+        )
+        self.assertEqual(reward, 1.5)
 
     def test_local_grid_reference_survives_window_move(self) -> None:
         system = WeatherSystem(clear_weather_parameters())
@@ -132,6 +161,22 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
             self.assertFalse(terminated or truncated)
             updates.append(info["weather_updated"])
         self.assertEqual(updates, [False] * 9 + [True])
+
+    def test_weather_nowcast_does_not_mutate_live_system(self) -> None:
+        parameters = replace(
+            clear_weather_parameters(frigate_initial_nm=(20.0, 20.0)),
+            weather=WeatherParameters(
+                initial_storm_count=1,
+                maximum_storm_count=1,
+                storm_motion_speed_knots=16.0,
+            ),
+        )
+        system = WeatherSystem(parameters)
+        before = system.current_frame()
+        forecasts = system.forecast_snapshots(3, step_minutes=1.0)
+        after = system.current_frame()
+        self.assertEqual(len(forecasts), 4)
+        self.assertEqual(before, after)
 
     def test_episode_configuration_is_seeded_and_randomized(self) -> None:
         parameters = clear_weather_parameters(frigate_initial_nm=(20.0, 20.0))

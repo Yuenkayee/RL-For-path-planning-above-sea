@@ -16,6 +16,7 @@ class RewardWeights:
     wait: float = -0.01
     speed_switch: float = -0.005
     progress: float = 1.0
+    planner_potential: float = 1.0
     proximity_5_nm: float = 5.0
     proximity_2_nm: float = 10.0
     proximity_1_nm: float = 20.0
@@ -39,10 +40,12 @@ def calculate_reward(
     speed_switched: bool,
     outcome: str | None,
     proximity_bonus: float = 0.0,
+    potential_shaping: float = 0.0,
 ) -> float:
     reward = (
         weights.step
         + weights.progress * (previous_distance_nm - current_distance_nm)
+        + weights.planner_potential * potential_shaping
         + proximity_bonus
     )
     if waited:

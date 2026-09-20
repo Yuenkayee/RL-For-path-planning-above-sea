@@ -13,6 +13,43 @@ from .reward import RewardWeights
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_CONFIG_PATH = REPOSITORY_ROOT / "config" / "envConfig.json"
+DEFAULT_PLANNER_CONFIG_PATH = REPOSITORY_ROOT / "config" / "plannerConfig.json"
+
+
+@dataclass(frozen=True)
+class PlannerConfig:
+    planning_horizon_minutes: float = 90.0
+    planning_step_seconds: float = 60.0
+    replanning_interval_seconds: float = 12.0
+    lookahead_distance_nm: float = 3.0
+    allow_wait: bool = True
+    wait_speed_knots: float = 0.0
+    flight_speed_knots: float = 100.0
+    weather_forecast_source: str = "constant_velocity_cells"
+
+    def __post_init__(self) -> None:
+        positive = (
+            self.planning_horizon_minutes,
+            self.planning_step_seconds,
+            self.replanning_interval_seconds,
+            self.lookahead_distance_nm,
+            self.flight_speed_knots,
+        )
+        if any(not math.isfinite(value) or value <= 0 for value in positive):
+            raise ValueError("planner time, distance and flight-speed values must be positive")
+        if self.wait_speed_knots < 0 or not math.isfinite(self.wait_speed_knots):
+            raise ValueError("planner wait speed must be finite and non-negative")
+        if self.weather_forecast_source != "constant_velocity_cells":
+            raise ValueError("only constant_velocity_cells weather forecasts are supported")
+
+    @property
+    def horizon_steps(self) -> int:
+        return math.ceil(self.planning_horizon_minutes * 60.0 / self.planning_step_seconds)
+
+    @classmethod
+    def from_json(cls, path: str | Path = DEFAULT_PLANNER_CONFIG_PATH) -> PlannerConfig:
+        with Path(path).expanduser().resolve().open(encoding="utf-8") as stream:
+            return cls(**json.load(stream))
 
 
 @dataclass(frozen=True)
@@ -21,12 +58,14 @@ class EnvironmentConfig:
     weather_step_seconds: float = 60.0
     maximum_episode_minutes: float = 120.0
     heading_count: int = 16
+    residual_heading_offsets_deg: tuple[float, ...] = (-45.0, -22.5, 0.0, 22.5, 45.0)
     helicopter_speed_knots: tuple[float, float] = (0.0, 100.0)
     frigate_speed_knots: float = 30.0
     frigate_heading_choices_deg: tuple[float, ...] = (45.0,)
     success_distance_nm: float = 1.0
     storm_safety_margin_nm: float = 0.1
     weather_history_frames: int = 6
+    potential_discount_factor: float = 0.99
     reward: RewardWeights = RewardWeights()
 
     def __post_init__(self) -> None:
@@ -41,6 +80,13 @@ class EnvironmentConfig:
             raise ValueError("time, speed and resolution values must be positive")
         if self.heading_count < 4:
             raise ValueError("heading_count must be at least four")
+        if not self.residual_heading_offsets_deg:
+            raise ValueError("residual_heading_offsets_deg cannot be empty")
+        if any(
+            not math.isfinite(offset) or not -180.0 <= offset <= 180.0
+            for offset in self.residual_heading_offsets_deg
+        ):
+            raise ValueError("residual heading offsets must be finite values in [-180, 180]")
         if len(self.helicopter_speed_knots) != 2:
             raise ValueError("helicopter_speed_knots must contain wait and cruise speeds")
         if self.helicopter_speed_knots[0] < 0 or self.helicopter_speed_knots[1] <= 0:
@@ -57,10 +103,12 @@ class EnvironmentConfig:
             raise ValueError("weather step must be an integer multiple of control step")
         if self.weather_history_frames < 1:
             raise ValueError("weather_history_frames must be positive")
+        if not 0.0 <= self.potential_discount_factor <= 1.0:
+            raise ValueError("potential_discount_factor must lie in [0, 1]")
 
     @property
     def action_count(self) -> int:
-        return self.heading_count + 1
+        return len(self.residual_heading_offsets_deg) + 1
 
     @property
     def wait_speed_knots(self) -> float:
@@ -89,6 +137,11 @@ class EnvironmentConfig:
             if not isinstance(speeds, (list, tuple)) or len(speeds) != 2:
                 raise ValueError("helicopter_speed_knots must contain two values")
             data["helicopter_speed_knots"] = (float(speeds[0]), float(speeds[1]))
+        if "residual_heading_offsets_deg" in data:
+            offsets = data["residual_heading_offsets_deg"]
+            if not isinstance(offsets, (list, tuple)) or not offsets:
+                raise ValueError("residual_heading_offsets_deg must contain at least one value")
+            data["residual_heading_offsets_deg"] = tuple(float(item) for item in offsets)
         if "frigate_heading_choices_deg" in data:
             headings = data["frigate_heading_choices_deg"]
             if not isinstance(headings, (list, tuple)) or not headings:
@@ -104,4 +157,9 @@ class EnvironmentConfig:
             return cls.from_mapping(json.load(stream))
 
 
-__all__ = ["DEFAULT_ENV_CONFIG_PATH", "EnvironmentConfig"]
+__all__ = [
+    "DEFAULT_ENV_CONFIG_PATH",
+    "DEFAULT_PLANNER_CONFIG_PATH",
+    "EnvironmentConfig",
+    "PlannerConfig",
+]

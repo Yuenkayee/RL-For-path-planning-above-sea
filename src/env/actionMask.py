@@ -24,6 +24,19 @@ def heading_for_action(action: int, heading_count: int) -> float | None:
     return (action - 1) * 360.0 / heading_count
 
 
+def heading_for_residual_action(
+    action: int,
+    reference_heading_deg: float,
+    residual_offsets_deg: tuple[float, ...],
+) -> float | None:
+    """Resolve wait-plus-residual actions into an absolute compass heading."""
+    if action == 0:
+        return None
+    if not 1 <= action <= len(residual_offsets_deg):
+        raise ValueError(f"action must be in [0, {len(residual_offsets_deg)}]")
+    return (reference_heading_deg + residual_offsets_deg[action - 1]) % 360.0
+
+
 def endpoint(
     position_nm: tuple[float, float],
     heading_deg: float,
@@ -85,9 +98,38 @@ def build_action_mask(
     return tuple(mask)
 
 
+def build_residual_action_mask(
+    weather_map: _WeatherLike,
+    position_nm: tuple[float, float],
+    *,
+    reference_heading_deg: float,
+    residual_offsets_deg: tuple[float, ...],
+    flight_speed_knots: float,
+    wait_speed_knots: float,
+    duration_seconds: float,
+    current_heading_deg: float = 0.0,
+) -> tuple[bool, ...]:
+    """Mask residual actions after composing them with the planner heading."""
+    mask: list[bool] = []
+    for action in range(len(residual_offsets_deg) + 1):
+        heading = heading_for_residual_action(
+            action, reference_heading_deg, residual_offsets_deg
+        )
+        if heading is None:
+            destination = endpoint(
+                position_nm, current_heading_deg, wait_speed_knots, duration_seconds
+            )
+        else:
+            destination = endpoint(position_nm, heading, flight_speed_knots, duration_seconds)
+        mask.append(segment_is_clear(weather_map, position_nm, destination))
+    return tuple(mask)
+
+
 __all__ = [
     "build_action_mask",
+    "build_residual_action_mask",
     "endpoint",
     "heading_for_action",
+    "heading_for_residual_action",
     "segment_is_clear",
 ]
