@@ -49,7 +49,7 @@ uv run python scripts/train_ppo.py --episodes 5000 --max-steps 1200
 uv run python scripts/train_dqn.py --episodes 10 --max-steps 1200
 uv run python scripts/train_sac.py --episodes 10 --max-steps 1200
 
-uv run python scripts/evaluate.py ppo --checkpoint build/checkpoints/ppo.pt
+uv run python scripts/evaluate.py ppo --checkpoint build/checkpoints/ppo_residual.pt
 uv run python scripts/evaluate.py sipp --max-steps 1200
 uv run python scripts/evaluate.py astar --max-steps 1200
 ```
@@ -64,7 +64,7 @@ tensorboard --logdir build/logs --port 6006
 
 ```bash
 python scripts/visualize_episode.py ppo \
-  --checkpoint build/checkpoints/ppo.pt \
+  --checkpoint build/checkpoints/ppo_residual.pt \
   --seed 0 \
   --max-steps 1200
 
@@ -109,13 +109,18 @@ python scripts/train_ppo.py --episodes 5000 --max-steps 1200 --num-envs 8 --devi
 如需在退出 SSH 后继续训练：
 
 ```bash
-mkdir -p build/logs/ppo
-nohup ./shell/start_ppo_training.sh > build/logs/ppo/nohup.log 2>&1 &
+mkdir -p build/logs/ppo_residual
+nohup ./shell/start_ppo_training.sh > build/logs/ppo_residual/nohup.log 2>&1 &
 ```
 
 可通过环境变量修改默认参数，例如
 `NUM_ENVS=4 DEVICE=cuda ./shell/start_ppo_training.sh`。命令行追加参数也会传给
 `scripts/train_ppo.py`，例如 `./shell/start_ppo_training.sh --quiet`。
+
+启动脚本默认将模型保存为 `build/checkpoints/ppo_residual.pt`，TensorBoard 和终端
+日志写入 `build/logs/ppo_residual`。训练成功结束后脚本会自动关闭服务器；若训练
+失败则不会关机。启动前脚本会检查当前用户是否为 root，或是否具有免密 `sudo`
+关机权限，不满足条件时会在训练开始前退出。
 
 PPO 默认启用四阶段课程学习，按全局 episode 编号依次使用无雷雨、静态雷雨、
 移动雷雨和完整动态雷雨；最后 40% 的 episode 使用 8 个初始、最多 12 个雷雨

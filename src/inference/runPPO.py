@@ -16,7 +16,12 @@ def run_ppo(
 ) -> EpisodeResult:
     env = ReturnEnv()
     observation, _ = env.reset(seed=seed)
-    agent = PPOAgent(env.action_count, observation, seed=seed)
+    agent = PPOAgent(
+        env.action_count,
+        observation,
+        seed=seed,
+        residual_heading_offsets_deg=env.config.residual_heading_offsets_deg,
+    )
     load_checkpoint(agent, checkpoint_path)
     return run_policy_episode(env, agent, seed=seed, max_steps=max_steps)
 

@@ -80,7 +80,13 @@ class AlgorithmTests(unittest.TestCase):
         self.done = terminated or truncated
 
     def test_ppo_predict_update_and_checkpoint(self) -> None:
-        agent = PPOAgent(self.env.action_count, self.observation, update_epochs=1, seed=1)
+        agent = PPOAgent(
+            self.env.action_count,
+            self.observation,
+            update_epochs=1,
+            seed=1,
+            residual_heading_offsets_deg=self.env.config.residual_heading_offsets_deg,
+        )
         action, info = agent.predict(self.observation)
         self.assertTrue(self.observation["action_mask"][action])
         agent.observe(self.observation, action, self.reward, self.done, info)
@@ -88,10 +94,33 @@ class AlgorithmTests(unittest.TestCase):
         self.assertEqual(metrics["samples"], 1.0)
         with tempfile.TemporaryDirectory() as directory:
             path = save_checkpoint(agent, Path(directory) / "ppo.pt")
-            restored = PPOAgent(self.env.action_count, self.observation, seed=2)
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+            self.assertEqual(payload["agent"]["action_count"], 6)
+            self.assertEqual(
+                payload["agent"]["action_semantics"],
+                "wait_plus_guidance_heading_residual_v1",
+            )
+            self.assertEqual(
+                payload["agent"]["residual_heading_offsets_deg"],
+                self.env.config.residual_heading_offsets_deg,
+            )
+            restored = PPOAgent(
+                self.env.action_count,
+                self.observation,
+                seed=2,
+                residual_heading_offsets_deg=self.env.config.residual_heading_offsets_deg,
+            )
             load_checkpoint(restored, path)
             for name, value in agent.network.state_dict().items():
                 self.assertTrue(torch.equal(value, restored.network.state_dict()[name]))
+            incompatible = PPOAgent(
+                self.env.action_count,
+                self.observation,
+                seed=2,
+                residual_heading_offsets_deg=(-60.0, -30.0, 0.0, 30.0, 60.0),
+            )
+            with self.assertRaisesRegex(ValueError, "residual heading offsets"):
+                load_checkpoint(incompatible, path)
 
     def test_parallel_ppo_reports_every_episode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

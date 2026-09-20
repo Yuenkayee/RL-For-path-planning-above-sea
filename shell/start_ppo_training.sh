@@ -13,8 +13,8 @@ NUM_ENVS="${NUM_ENVS:-8}"
 DEVICE="${DEVICE:-auto}"
 SEED="${SEED:-0}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-100}"
-CHECKPOINT="${CHECKPOINT:-${REPOSITORY_ROOT}/build/checkpoints/ppo.pt}"
-TENSORBOARD_LOG_DIR="${TENSORBOARD_LOG_DIR:-${REPOSITORY_ROOT}/build/logs/ppo}"
+CHECKPOINT="${CHECKPOINT:-${REPOSITORY_ROOT}/build/checkpoints/ppo_residual.pt}"
+TENSORBOARD_LOG_DIR="${TENSORBOARD_LOG_DIR:-${REPOSITORY_ROOT}/build/logs/ppo_residual}"
 
 die() {
     printf '[ppo-training] ERROR: %s\n' "$*" >&2
@@ -34,6 +34,17 @@ for value_name in EPISODES MAX_STEPS NUM_ENVS PROGRESS_INTERVAL; do
     [[ "${value}" =~ ^[1-9][0-9]*$ ]] || die \
         "${value_name} must be a positive integer; received ${value}."
 done
+
+SHUTDOWN_BIN="$(command -v shutdown || true)"
+[[ -n "${SHUTDOWN_BIN}" ]] || die "The shutdown command was not found."
+if (( EUID == 0 )); then
+    SHUTDOWN_COMMAND=("${SHUTDOWN_BIN}" -h now)
+elif command -v sudo >/dev/null 2>&1 \
+    && sudo -n -l "${SHUTDOWN_BIN}" -h now >/dev/null 2>&1; then
+    SHUTDOWN_COMMAND=(sudo -n "${SHUTDOWN_BIN}" -h now)
+else
+    die "Automatic shutdown requires root or passwordless sudo permission for shutdown."
+fi
 
 mkdir -p "$(dirname -- "${CHECKPOINT}")" "${TENSORBOARD_LOG_DIR}"
 
@@ -61,3 +72,7 @@ PYTHONUNBUFFERED=1 "${PYTHON_BIN}" scripts/train_ppo.py \
     --checkpoint "${CHECKPOINT}" \
     --log-dir "${TENSORBOARD_LOG_DIR}" \
     "$@" 2>&1 | tee "${CONSOLE_LOG}"
+
+printf '[ppo-training] Training completed successfully; shutting down the server now.\n'
+sync
+"${SHUTDOWN_COMMAND[@]}"

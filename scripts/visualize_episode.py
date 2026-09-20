@@ -44,13 +44,19 @@ def _build_policy(
     if method == "astar":
         return ClassicalPlannerController(env, TimeExpandedAStarPlanner())
 
-    checkpoint = checkpoint or ROOT / "build" / "checkpoints" / f"{method}.pt"
+    default_name = "ppo_residual.pt" if method == "ppo" else f"{method}.pt"
+    checkpoint = checkpoint or ROOT / "build" / "checkpoints" / default_name
     if not checkpoint.is_file():
         raise FileNotFoundError(
             f"checkpoint not found: {checkpoint}. Train {method.upper()} first or pass --checkpoint."
         )
     agent_types = {"ppo": PPOAgent, "dqn": DQNAgent, "sac": SACAgent}
-    agent = agent_types[method](env.action_count, observation, seed=seed)
+    agent_kwargs = (
+        {"residual_heading_offsets_deg": env.config.residual_heading_offsets_deg}
+        if method == "ppo"
+        else {}
+    )
+    agent = agent_types[method](env.action_count, observation, seed=seed, **agent_kwargs)
     load_checkpoint(agent, checkpoint)
     return agent
 

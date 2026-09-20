@@ -261,6 +261,7 @@ def train_ppo(
         update_epochs=config["update_epochs"],
         seed=seed,
         device=selected_device,
+        residual_heading_offsets_deg=env.config.residual_heading_offsets_deg,
     )
 
     episode_ids_by_worker = [

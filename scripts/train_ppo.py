@@ -43,8 +43,11 @@ def main() -> None:
         action="store_true",
         help="disable the four-stage weather curriculum",
     )
-    parser.add_argument("--checkpoint", default=str(ROOT / "build/checkpoints/ppo.pt"))
-    parser.add_argument("--log-dir", default=str(ROOT / "build/logs/ppo"))
+    parser.add_argument(
+        "--checkpoint",
+        default=str(ROOT / "build/checkpoints/ppo_residual.pt"),
+    )
+    parser.add_argument("--log-dir", default=str(ROOT / "build/logs/ppo_residual"))
     args = parser.parse_args()
     _, metrics = train_ppo(
         ReturnEnv(),

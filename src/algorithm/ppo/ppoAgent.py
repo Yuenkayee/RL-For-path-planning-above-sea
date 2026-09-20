@@ -35,11 +35,17 @@ class PPOAgent:
         update_epochs: int = 10,
         seed: int | None = None,
         device: str = "cpu",
+        residual_heading_offsets_deg: tuple[float, ...] | None = None,
     ) -> None:
         if seed is not None:
             torch.manual_seed(seed)
             np.random.seed(seed)
         self.device = torch.device(device)
+        self.residual_heading_offsets_deg = (
+            tuple(float(value) for value in residual_heading_offsets_deg)
+            if residual_heading_offsets_deg is not None
+            else None
+        )
         history_frames = int(np.asarray(sample_observation["global_weather"]).shape[0])
         self.network = PPONetwork(history_frames, action_count).to(self.device)
         self.policy = MaskedCategoricalPolicy(self.network)
@@ -215,6 +221,7 @@ class PPOAgent:
             "algorithm": "ppo",
             "action_count": self.network.action_count,
             "action_semantics": "wait_plus_guidance_heading_residual_v1",
+            "residual_heading_offsets_deg": self.residual_heading_offsets_deg,
             "network": self.network.state_dict(),
             "optimizer": self.optimizer.state_dict(),
         }
@@ -233,6 +240,18 @@ class PPOAgent:
         semantics = state.get("action_semantics")
         if semantics not in {None, "wait_plus_guidance_heading_residual_v1"}:
             raise ValueError(f"unsupported checkpoint action semantics: {semantics}")
+        checkpoint_offsets = state.get("residual_heading_offsets_deg")
+        if (
+            checkpoint_offsets is not None
+            and self.residual_heading_offsets_deg is not None
+            and tuple(float(value) for value in checkpoint_offsets)
+            != self.residual_heading_offsets_deg
+        ):
+            raise ValueError(
+                "checkpoint residual heading offsets do not match the current environment: "
+                f"checkpoint={tuple(checkpoint_offsets)}, "
+                f"current={self.residual_heading_offsets_deg}"
+            )
         self.network.load_state_dict(state["network"])
         if "optimizer" in state:
             self.optimizer.load_state_dict(state["optimizer"])

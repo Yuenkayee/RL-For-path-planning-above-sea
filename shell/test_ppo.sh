@@ -7,7 +7,7 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPOSITORY_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 UV_BIN="${UV_BIN:-uv}"
-CHECKPOINT="${CHECKPOINT:-${REPOSITORY_ROOT}/build/checkpoints/ppo.pt}"
+CHECKPOINT="${CHECKPOINT:-${REPOSITORY_ROOT}/build/checkpoints/ppo_residual.pt}"
 SEED="${SEED:-0}"
 MAX_STEPS="${MAX_STEPS:-1200}"
 TEST_SEEDS="${TEST_SEEDS:-0 1 2 3 4 5 6 7 8 9}"
