@@ -378,6 +378,82 @@ class WeatherSystem:
         """Return detached copies of the active cell states."""
         return tuple(replace(cell) for cell in self._cells)
 
+    def minimum_storm_clearance_nm(self, point_nm: tuple[float, float]) -> float:
+        """Return a conservative radial clearance from a point to active storm cells."""
+        if not self._cells:
+            return math.hypot(*self.parameters.map_size_nm)
+        irregularity = self.parameters.weather.shape_irregularity
+        return max(
+            0.0,
+            min(
+                math.dist(point_nm, (cell.center_x_nm, cell.center_y_nm))
+                - cell.major_radius_nm * cell.scale * (1.0 + irregularity)
+                for cell in self._cells
+            ),
+        )
+
+    def configure_route_conflicts(
+        self,
+        *,
+        route_start_nm: tuple[float, float],
+        route_end_nm: tuple[float, float],
+        route_duration_minutes: float,
+        conflict_count: int,
+    ) -> None:
+        """Place existing moving cells across distinct parts of a nominal route."""
+        if conflict_count < 0:
+            raise ValueError("conflict_count must be non-negative")
+        if conflict_count == 0:
+            return
+        if self.parameters.weather.storm_motion_speed_knots <= 0.0:
+            raise ValueError("route conflicts require moving weather")
+        if conflict_count > len(self._cells):
+            raise ValueError("not enough active storm cells to create route conflicts")
+        if route_duration_minutes <= 0.0:
+            raise ValueError("route duration must be positive")
+
+        width, height = self.parameters.map_size_nm
+        fractions = (
+            (0.5,)
+            if conflict_count == 1
+            else tuple(0.25 + 0.5 * index / (conflict_count - 1) for index in range(conflict_count))
+        )
+        for cell, fraction in zip(self._cells, fractions, strict=False):
+            encounter_minutes = route_duration_minutes * fraction
+            route_point = (
+                route_start_nm[0] + (route_end_nm[0] - route_start_nm[0]) * fraction,
+                route_start_nm[1] + (route_end_nm[1] - route_start_nm[1]) * fraction,
+            )
+            selected: tuple[float, float, float] | None = None
+            travel_nm = cell.speed_knots * encounter_minutes / 60.0
+            for heading_deg in (
+                cell.heading_deg,
+                cell.heading_deg + 180.0,
+                0.0,
+                90.0,
+                180.0,
+                270.0,
+                45.0,
+                135.0,
+                225.0,
+                315.0,
+            ):
+                heading_rad = math.radians(heading_deg)
+                center_x = route_point[0] - travel_nm * math.sin(heading_rad)
+                center_y = route_point[1] - travel_nm * math.cos(heading_rad)
+                if 0.0 <= center_x < width and 0.0 <= center_y < height:
+                    selected = center_x, center_y, heading_deg % 360.0
+                    break
+            if selected is None:
+                raise RuntimeError("could not place a moving storm across the nominal route")
+            cell.center_x_nm, cell.center_y_nm, cell.heading_deg = selected
+            cell.age_minutes = 0.0
+            cell.lifetime_minutes = max(cell.lifetime_minutes, encounter_minutes + 5.0)
+            cell.major_radius_nm = min(cell.major_radius_nm, 2.5)
+            cell.minor_radius_nm = min(cell.minor_radius_nm, cell.major_radius_nm * 0.8)
+
+        self._render_to_map(protect_initial_positions=True)
+
     def _default_local_origin(self) -> tuple[float, float]:
         map_width, map_height = self.parameters.map_size_nm
         local_width, local_height = self.parameters.local_size_nm

@@ -67,6 +67,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=_positive_integer, default=1200)
+    parser.add_argument("--minimum-route-conflicts", type=int, choices=(0, 1, 2), default=0)
     parser.add_argument(
         "--frame-stride",
         type=_positive_integer,
@@ -84,7 +85,8 @@ def main() -> None:
     snapshot_output = args.snapshot_output or output.with_suffix(".png")
 
     env = ReturnEnv()
-    observation, _ = env.reset(seed=args.seed)
+    reset_options = {"minimum_route_conflicts": args.minimum_route_conflicts}
+    observation, _ = env.reset(seed=args.seed, options=reset_options)
     try:
         policy = _build_policy(
             args.method,
@@ -103,6 +105,7 @@ def main() -> None:
         seed=args.seed,
         max_steps=args.max_steps,
         frame_stride=args.frame_stride,
+        reset_options=reset_options,
     )
     gif_path = save_episode_visualization(trace, output, fps=args.fps)
     png_path = save_episode_visualization(trace, snapshot_output, fps=args.fps)

@@ -12,13 +12,24 @@ from .onlinePlanner import EpisodeResult, run_policy_episode
 
 
 def run_dqn(
-    checkpoint_path: str | Path, *, seed: int = 0, max_steps: int | None = None
+    checkpoint_path: str | Path,
+    *,
+    seed: int = 0,
+    max_steps: int | None = None,
+    minimum_route_conflicts: int = 0,
 ) -> EpisodeResult:
     env = ReturnEnv()
-    observation, _ = env.reset(seed=seed)
+    reset_options = {"minimum_route_conflicts": minimum_route_conflicts}
+    observation, _ = env.reset(seed=seed, options=reset_options)
     agent = DQNAgent(env.action_count, observation, seed=seed)
     load_checkpoint(agent, checkpoint_path)
-    return run_policy_episode(env, agent, seed=seed, max_steps=max_steps)
+    return run_policy_episode(
+        env,
+        agent,
+        seed=seed,
+        max_steps=max_steps,
+        reset_options=reset_options,
+    )
 
 
 __all__ = ["run_dqn"]

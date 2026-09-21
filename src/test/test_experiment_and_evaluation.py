@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -43,6 +44,7 @@ def _easy_environment() -> ReturnEnv:
         EnvironmentConfig(
             maximum_episode_minutes=2.0,
             frigate_heading_choices_deg=(0.0,),
+            randomize_frigate_initial_position=False,
             weather_history_frames=2,
         ),
         weather_parameters=parameters,
@@ -88,6 +90,24 @@ class ExperimentAndEvaluationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = save_evaluation_plot({"wait": result}, Path(directory) / "result.png")
             self.assertGreater(output.stat().st_size, 0)
+
+    def test_fixed_ppo_evaluation_scenarios_have_multiple_route_conflicts(self) -> None:
+        ppo_config = json.loads((ROOT / "config/ppoConfig.json").read_text(encoding="utf-8"))
+        parameters = parameters_for_stage(
+            SimulationParameters.from_json(), DEFAULT_CURRICULUM[-1]
+        )
+        env = ReturnEnv(weather_parameters=parameters)
+        minimum_conflicts = ppo_config["evaluation_minimum_route_conflicts"]
+        for seed in ppo_config["evaluation_seeds"]:
+            _, info = env.reset(
+                seed=seed,
+                options={"minimum_route_conflicts": minimum_conflicts},
+            )
+            self.assertGreaterEqual(
+                info["episode_config"]["route_conflict_regions"],
+                minimum_conflicts,
+                f"seed={seed}",
+            )
 
     def test_episode_trace_and_static_visualization(self) -> None:
         env = _easy_environment()

@@ -1,6 +1,6 @@
 {
   "algorithm": "masked_ppo",
-  "learning_rate": 0.0003,
+  "learning_rate": 0.0001,
   "discount_factor": 0.99,
   "gae_lambda": 0.95,
   "clip_range": 0.2,
@@ -8,7 +8,13 @@
   "value_coefficient": 0.5,
   "rollout_steps": 2048,
   "batch_size": 64,
-  "update_epochs": 10,
+  "update_epochs": 5,
   "hard_seed_replay_probability": 0.2,
-  "hard_episode_seeds": [1, 4, 6]
+  "hard_episode_seeds": [1, 4, 6],
+  "hard_seed_pool_capacity": 128,
+  "dynamic_route_conflict_probability": 0.6,
+  "dynamic_multi_route_conflict_probability": 0.2,
+  "evaluation_interval_episodes": 250,
+  "evaluation_minimum_route_conflicts": 2,
+  "evaluation_seeds": [10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010]
 }

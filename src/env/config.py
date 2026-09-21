@@ -62,6 +62,10 @@ class EnvironmentConfig:
     helicopter_speed_knots: tuple[float, float] = (0.0, 100.0)
     frigate_speed_knots: float = 30.0
     frigate_heading_choices_deg: tuple[float, ...] = (45.0,)
+    randomize_frigate_initial_position: bool = True
+    frigate_minimum_route_minutes: float = 60.0
+    frigate_boundary_margin_nm: float = 1.0
+    frigate_minimum_initial_distance_nm: float = 20.0
     success_distance_nm: float = 1.0
     storm_safety_margin_nm: float = 0.1
     weather_history_frames: int = 6
@@ -74,6 +78,7 @@ class EnvironmentConfig:
             self.weather_step_seconds,
             self.maximum_episode_minutes,
             self.frigate_speed_knots,
+            self.frigate_minimum_route_minutes,
             self.success_distance_nm,
         )
         if any(not math.isfinite(item) or item <= 0 for item in positive):
@@ -98,6 +103,13 @@ class EnvironmentConfig:
             for heading in self.frigate_heading_choices_deg
         ):
             raise ValueError("frigate headings must be finite values in [0, 360)")
+        if not math.isfinite(self.frigate_boundary_margin_nm) or self.frigate_boundary_margin_nm < 0:
+            raise ValueError("frigate boundary margin must be finite and non-negative")
+        if (
+            not math.isfinite(self.frigate_minimum_initial_distance_nm)
+            or self.frigate_minimum_initial_distance_nm < 0
+        ):
+            raise ValueError("frigate minimum initial distance must be finite and non-negative")
         ratio = self.weather_step_seconds / self.control_step_seconds
         if not math.isclose(ratio, round(ratio), abs_tol=1e-9):
             raise ValueError("weather step must be an integer multiple of control step")

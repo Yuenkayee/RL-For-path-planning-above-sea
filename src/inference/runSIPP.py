@@ -8,11 +8,19 @@ from planner.sippPlanner import SIPPPlanner
 from .onlinePlanner import ClassicalPlannerController, EpisodeResult, run_policy_episode
 
 
-def run_sipp(*, seed: int = 0, max_steps: int | None = None) -> EpisodeResult:
+def run_sipp(
+    *, seed: int = 0, max_steps: int | None = None, minimum_route_conflicts: int = 0
+) -> EpisodeResult:
     env = ReturnEnv()
     planner = SIPPPlanner()
     controller = ClassicalPlannerController(env, planner)
-    return run_policy_episode(env, controller, seed=seed, max_steps=max_steps)
+    return run_policy_episode(
+        env,
+        controller,
+        seed=seed,
+        max_steps=max_steps,
+        reset_options={"minimum_route_conflicts": minimum_route_conflicts},
+    )
 
 
 __all__ = ["run_sipp"]

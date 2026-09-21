@@ -24,15 +24,39 @@ def main() -> None:
     parser.add_argument("--checkpoint")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=200)
+    parser.add_argument("--minimum-route-conflicts", type=int, choices=(0, 1, 2), default=0)
     args = parser.parse_args()
     if args.method in {"ppo", "dqn", "sac"} and not args.checkpoint:
         parser.error("--checkpoint is required for learned methods")
     runners = {
-        "ppo": lambda: run_ppo(args.checkpoint, seed=args.seed, max_steps=args.max_steps),
-        "dqn": lambda: run_dqn(args.checkpoint, seed=args.seed, max_steps=args.max_steps),
-        "sac": lambda: run_sac(args.checkpoint, seed=args.seed, max_steps=args.max_steps),
-        "sipp": lambda: run_sipp(seed=args.seed, max_steps=args.max_steps),
-        "astar": lambda: run_time_astar(seed=args.seed, max_steps=args.max_steps),
+        "ppo": lambda: run_ppo(
+            args.checkpoint,
+            seed=args.seed,
+            max_steps=args.max_steps,
+            minimum_route_conflicts=args.minimum_route_conflicts,
+        ),
+        "dqn": lambda: run_dqn(
+            args.checkpoint,
+            seed=args.seed,
+            max_steps=args.max_steps,
+            minimum_route_conflicts=args.minimum_route_conflicts,
+        ),
+        "sac": lambda: run_sac(
+            args.checkpoint,
+            seed=args.seed,
+            max_steps=args.max_steps,
+            minimum_route_conflicts=args.minimum_route_conflicts,
+        ),
+        "sipp": lambda: run_sipp(
+            seed=args.seed,
+            max_steps=args.max_steps,
+            minimum_route_conflicts=args.minimum_route_conflicts,
+        ),
+        "astar": lambda: run_time_astar(
+            seed=args.seed,
+            max_steps=args.max_steps,
+            minimum_route_conflicts=args.minimum_route_conflicts,
+        ),
     }
     result = runners[args.method]()
     payload = asdict(result)

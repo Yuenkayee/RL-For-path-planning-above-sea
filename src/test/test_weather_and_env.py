@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 import unittest
 from dataclasses import replace
@@ -137,6 +138,7 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
         config = EnvironmentConfig(
             maximum_episode_minutes=5.0,
             frigate_heading_choices_deg=(0.0,),
+            randomize_frigate_initial_position=False,
             weather_history_frames=2,
         )
         env = ReturnEnv(config, weather_parameters=clear_weather_parameters())
@@ -199,6 +201,27 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
         self.assertNotEqual(
             first["episode_config"]["storm_area_scale"],
             different["episode_config"]["storm_area_scale"],
+        )
+        self.assertNotEqual(
+            first["episode_config"]["frigate_initial_nm"],
+            different["episode_config"]["frigate_initial_nm"],
+        )
+        frigate_start = different["episode_config"]["frigate_initial_nm"]
+        heading_rad = math.radians(different["episode_config"]["frigate_heading_deg"])
+        one_hour_end = (
+            frigate_start[0] + config.frigate_speed_knots * math.sin(heading_rad),
+            frigate_start[1] + config.frigate_speed_knots * math.cos(heading_rad),
+        )
+        margin = config.frigate_boundary_margin_nm
+        self.assertTrue(
+            margin <= one_hour_end[0] < parameters.map_size_nm[0] - margin
+        )
+        self.assertTrue(
+            margin <= one_hour_end[1] < parameters.map_size_nm[1] - margin
+        )
+        self.assertGreaterEqual(
+            math.dist(parameters.helicopter_initial_nm, frigate_start),
+            config.frigate_minimum_initial_distance_nm,
         )
         self.assertEqual(
             env.weather_system.parameters.weather.storm_area_scale,

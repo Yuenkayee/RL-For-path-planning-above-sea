@@ -33,6 +33,11 @@ from .config import (
 )
 from .observation import build_observation
 from .reward import calculate_reward, newly_reached_proximity_bonus
+from .scenario import (
+    RouteConflictSummary,
+    count_nominal_route_conflicts,
+    sample_frigate_initial_position,
+)
 from .termination import inside_map, successful_rendezvous
 
 
@@ -131,6 +136,13 @@ class ReturnEnv(gym.Env):
         self._forecast_time_minutes: float | None = None
         self._planner_potential = 0.0
         self._reached_proximity_thresholds_nm: set[float] = set()
+        self._episode_seed = -1
+        self._route_conflicts = RouteConflictSummary(0, 0, 0)
+        self._minimum_storm_clearance_nm = math.inf
+        self._wait_steps = 0
+        self._heading_change_steps = 0
+        self._avoidance_decision_steps = 0
+        self._blocked_flight_actions = 0
         self._done = False
         self.reset()
 
@@ -144,15 +156,32 @@ class ReturnEnv(gym.Env):
         seed: int | None = None,
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        del options
+        reset_options = options or {}
+        minimum_route_conflicts = int(reset_options.get("minimum_route_conflicts", 0))
+        if minimum_route_conflicts < 0:
+            raise ValueError("minimum_route_conflicts must be non-negative")
         super().reset(seed=seed)
         parameters = self._base_weather_parameters
         episode_seed = seed if seed is not None else parameters.random_seed
         episode_rng = random.Random(episode_seed)
         frigate_heading_deg = episode_rng.choice(self.config.frigate_heading_choices_deg)
         storm_area_scale = episode_rng.uniform(*parameters.weather.storm_area_scale_range)
+        frigate_initial_nm = parameters.frigate_initial_nm
+        if self.config.randomize_frigate_initial_position:
+            frigate_initial_nm, _ = sample_frigate_initial_position(
+                episode_rng,
+                map_size_nm=parameters.map_size_nm,
+                helicopter_nm=parameters.helicopter_initial_nm,
+                heading_deg=frigate_heading_deg,
+                frigate_speed_knots=self.config.frigate_speed_knots,
+                helicopter_speed_knots=self.config.flight_speed_knots,
+                route_minutes=self.config.frigate_minimum_route_minutes,
+                boundary_margin_nm=self.config.frigate_boundary_margin_nm,
+                minimum_distance_nm=self.config.frigate_minimum_initial_distance_nm,
+            )
         parameters = replace(
             parameters,
+            frigate_initial_nm=frigate_initial_nm,
             weather=replace(parameters.weather, storm_area_scale=storm_area_scale),
         )
         if seed is not None:
@@ -168,11 +197,34 @@ class ReturnEnv(gym.Env):
             speed_knots=self.config.frigate_speed_knots,
             heading_deg=frigate_heading_deg,
         )
+        intercept = predict_intercept(
+            (self.helicopter.x_nm, self.helicopter.y_nm),
+            (self.frigate.x_nm, self.frigate.y_nm),
+            self._frigate_velocity(),
+            self.config.flight_speed_knots,
+        )
+        if minimum_route_conflicts:
+            if intercept is None:
+                raise RuntimeError("cannot create route conflicts without a feasible intercept")
+            self.weather_system.configure_route_conflicts(
+                route_start_nm=(self.helicopter.x_nm, self.helicopter.y_nm),
+                route_end_nm=intercept.point_nm,
+                route_duration_minutes=intercept.time_hours * 60.0,
+                conflict_count=minimum_route_conflicts,
+            )
         self.elapsed_seconds = 0.0
         self._weather_elapsed_seconds = 0.0
         self._guidance_elapsed_seconds = 0.0
         self._previous_moving = False
         self._reached_proximity_thresholds_nm.clear()
+        self._episode_seed = int(parameters.random_seed) if parameters.random_seed is not None else -1
+        self._minimum_storm_clearance_nm = self.weather_system.minimum_storm_clearance_nm(
+            parameters.helicopter_initial_nm
+        )
+        self._wait_steps = 0
+        self._heading_change_steps = 0
+        self._avoidance_decision_steps = 0
+        self._blocked_flight_actions = 0
         self._done = False
         self._history.clear()
         self._forecast_frames = ()
@@ -181,12 +233,32 @@ class ReturnEnv(gym.Env):
         for _ in range(self.config.weather_history_frames):
             self._history.append(snapshot)
         self._refresh_guidance()
+        self._route_conflicts = (
+            count_nominal_route_conflicts(
+                self._forecast_frames,
+                start_nm=(self.helicopter.x_nm, self.helicopter.y_nm),
+                intercept=intercept,
+                forecast_step_minutes=self._guidance_planner.step_seconds / 60.0,
+            )
+            if intercept is not None
+            else RouteConflictSummary(0, 0, 0)
+        )
+        if self._route_conflicts.regions < minimum_route_conflicts:
+            raise RuntimeError(
+                "configured dynamic scenario did not produce the required independent "
+                f"route conflicts: required={minimum_route_conflicts}, "
+                f"actual={self._route_conflicts.regions}"
+            )
         self._planner_potential = self._guidance_potential()
         return self._observation(), {
             "seed": parameters.random_seed,
             "episode_config": {
                 "frigate_heading_deg": frigate_heading_deg,
+                "frigate_initial_nm": frigate_initial_nm,
                 "storm_area_scale": storm_area_scale,
+                "route_conflict_regions": self._route_conflicts.regions,
+                "route_conflict_fraction": self._route_conflicts.occupied_fraction,
+                "required_route_conflicts": minimum_route_conflicts,
             },
         }
 
@@ -358,6 +430,14 @@ class ReturnEnv(gym.Env):
         previous_potential = self._planner_potential
         moving = action != 0
         speed_switched = moving != self._previous_moving
+        previous_heading = self.helicopter.heading_deg
+        action_mask_before = self.get_action_mask()
+        blocked_flight_actions = sum(not allowed for allowed in action_mask_before[1:])
+        self._blocked_flight_actions += blocked_flight_actions
+        if blocked_flight_actions:
+            self._avoidance_decision_steps += 1
+        if not moving:
+            self._wait_steps += 1
         reference_heading = self._reference_heading_deg()
         heading = heading_for_residual_action(
             action,
@@ -365,6 +445,10 @@ class ReturnEnv(gym.Env):
             self.config.residual_heading_offsets_deg,
         )
         self.helicopter.select_motion(moving=moving, heading_deg=heading)
+        if moving and self._previous_moving:
+            heading_change = abs((self.helicopter.heading_deg - previous_heading + 180.0) % 360.0 - 180.0)
+            if heading_change > 1e-6:
+                self._heading_change_steps += 1
         self.helicopter.step(dt)
         self.frigate.step(dt)
         self.elapsed_seconds += dt
@@ -383,6 +467,10 @@ class ReturnEnv(gym.Env):
         end = (self.helicopter.x_nm, self.helicopter.y_nm)
         frigate_end = (self.frigate.x_nm, self.frigate.y_nm)
         current_distance = math.dist(end, frigate_end)
+        self._minimum_storm_clearance_nm = min(
+            self._minimum_storm_clearance_nm,
+            self.weather_system.minimum_storm_clearance_nm(end),
+        )
         outcome: str | None = None
         terminated = False
         truncated = False
@@ -468,6 +556,14 @@ class ReturnEnv(gym.Env):
             "executed_heading_deg": heading,
             "planner_potential": current_potential,
             "potential_shaping": potential_shaping,
+            "episode_seed": self._episode_seed,
+            "route_conflict_regions": self._route_conflicts.regions,
+            "route_conflict_fraction": self._route_conflicts.occupied_fraction,
+            "minimum_storm_clearance_nm": self._minimum_storm_clearance_nm,
+            "wait_steps": self._wait_steps,
+            "heading_change_steps": self._heading_change_steps,
+            "avoidance_decision_steps": self._avoidance_decision_steps,
+            "blocked_flight_actions": self._blocked_flight_actions,
         }
         return observation, reward, terminated, truncated, info
 

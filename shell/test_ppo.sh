@@ -6,11 +6,12 @@ set -Eeuo pipefail
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPOSITORY_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-UV_BIN="${UV_BIN:-uv}"
-CHECKPOINT="${CHECKPOINT:-${REPOSITORY_ROOT}/build/checkpoints/ppo_residual.pt}"
-SEED="${SEED:-0}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+CHECKPOINT="${CHECKPOINT:-${REPOSITORY_ROOT}/build/checkpoints/ppo_residual.best.pt}"
+SEED="${SEED:-10001}"
 MAX_STEPS="${MAX_STEPS:-1200}"
-TEST_SEEDS="${TEST_SEEDS:-0 1 2 3 4 5 6 7 8 9}"
+TEST_SEEDS="${TEST_SEEDS:-10001 10002 10003 10004 10005 10006 10007 10008 10009 10010}"
+MINIMUM_ROUTE_CONFLICTS="${MINIMUM_ROUTE_CONFLICTS:-2}"
 readonly RUN_TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPOSITORY_ROOT}/build/evaluation/ppo_test-${RUN_TIMESTAMP}}"
 
@@ -19,17 +20,20 @@ die() {
     exit 1
 }
 
-if [[ "${UV_BIN}" == */* ]]; then
-    [[ -x "${UV_BIN}" ]] || die "uv is not executable: ${UV_BIN}"
+if [[ "${PYTHON_BIN}" == */* ]]; then
+    [[ -x "${PYTHON_BIN}" ]] || die "Python is not executable: ${PYTHON_BIN}"
 else
-    UV_BIN="$(command -v "${UV_BIN}" || true)"
-    [[ -n "${UV_BIN}" ]] || die "uv was not found. Install uv or set UV_BIN."
+    PYTHON_BIN="$(command -v "${PYTHON_BIN}" || true)"
+    [[ -n "${PYTHON_BIN}" ]] || die \
+        "Python was not found. Activate the training environment or set PYTHON_BIN."
 fi
 
 [[ -f "${CHECKPOINT}" ]] || die \
     "PPO checkpoint not found: ${CHECKPOINT}. Run shell/start_ppo_training.sh first."
 [[ "${SEED}" =~ ^[0-9]+$ ]] || die "SEED must be a non-negative integer."
 [[ "${MAX_STEPS}" =~ ^[1-9][0-9]*$ ]] || die "MAX_STEPS must be a positive integer."
+[[ "${MINIMUM_ROUTE_CONFLICTS}" =~ ^[1-9][0-9]*$ ]] || die \
+    "MINIMUM_ROUTE_CONFLICTS must be a positive integer."
 
 read -r -a seed_values <<<"${TEST_SEEDS}"
 ((${#seed_values[@]} > 0)) || die "TEST_SEEDS must contain at least one seed."
@@ -58,6 +62,7 @@ cd "${REPOSITORY_ROOT}"
 printf '[ppo-test] Checkpoint: %s\n' "${CHECKPOINT}"
 printf '[ppo-test] Single-scenario seed: %s; max steps: %s\n' "${SEED}" "${MAX_STEPS}"
 printf '[ppo-test] Test seeds: %s\n' "${all_test_seeds[*]}"
+printf '[ppo-test] Minimum route conflicts per scenario: %s\n' "${MINIMUM_ROUTE_CONFLICTS}"
 printf '[ppo-test] Output directory: %s\n' "${OUTPUT_DIR}"
 
 readonly BATCH_RESULT="${OUTPUT_DIR}/ppo_batch_results.jsonl"
@@ -66,18 +71,20 @@ readonly BATCH_RESULT="${OUTPUT_DIR}/ppo_batch_results.jsonl"
 # Evaluate and visualize every deterministic test scenario selected by seed.
 for test_seed in "${all_test_seeds[@]}"; do
     printf '[ppo-test] Evaluating seed %s\n' "${test_seed}" >&2
-    "${UV_BIN}" run python scripts/evaluate.py ppo \
+    "${PYTHON_BIN}" scripts/evaluate.py ppo \
         --checkpoint "${CHECKPOINT}" \
         --seed "${test_seed}" \
         --max-steps "${MAX_STEPS}" \
+        --minimum-route-conflicts "${MINIMUM_ROUTE_CONFLICTS}" \
         | tee "${OUTPUT_DIR}/ppo_seed${test_seed}_result.json" \
         | tee -a "${BATCH_RESULT}"
 
     printf '[ppo-test] Rendering animation for seed %s\n' "${test_seed}" >&2
-    "${UV_BIN}" run python scripts/visualize_episode.py ppo \
+    "${PYTHON_BIN}" scripts/visualize_episode.py ppo \
         --checkpoint "${CHECKPOINT}" \
         --seed "${test_seed}" \
         --max-steps "${MAX_STEPS}" \
+        --minimum-route-conflicts "${MINIMUM_ROUTE_CONFLICTS}" \
         --output "${OUTPUT_DIR}/ppo_seed${test_seed}.gif" \
         --snapshot-output "${OUTPUT_DIR}/ppo_seed${test_seed}.png"
 done

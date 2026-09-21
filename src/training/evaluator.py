@@ -40,13 +40,14 @@ def evaluate_policy(
     *,
     seeds: tuple[int, ...],
     max_steps: int | None = None,
+    reset_options: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     rewards: list[float] = []
     steps_per_episode: list[int] = []
     outcomes: list[str | None] = []
     for seed in seeds:
         env = env_factory()
-        observation, _ = env.reset(seed=seed)
+        observation, _ = env.reset(seed=seed, options=reset_options)
         total_reward = 0.0
         step = 0
         while True:
@@ -59,6 +60,7 @@ def evaluate_policy(
                 break
         rewards.append(total_reward)
         steps_per_episode.append(step)
+        env.close()
     return EvaluationResult(
         episodes=len(seeds),
         successes=sum(outcome == "success" for outcome in outcomes),

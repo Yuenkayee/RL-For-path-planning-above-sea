@@ -20,7 +20,13 @@ from env.config import EnvironmentConfig
 from env.returnEnv import ReturnEnv
 from model.weatherSystem import SimulationParameters, WeatherParameters
 from training.checkpoint import load_checkpoint, save_checkpoint
-from training.trainPPO import _episode_seed, _flush_ordered_episode_metrics, train_ppo
+from training.trainPPO import (
+    _episode_seed,
+    _EpisodeMetric,
+    _flush_ordered_episode_metrics,
+    _route_conflict_requirement,
+    train_ppo,
+)
 
 
 class _RecordingWriter:
@@ -65,6 +71,7 @@ def make_success_environment() -> ReturnEnv:
         EnvironmentConfig(
             maximum_episode_minutes=2.0,
             frigate_heading_choices_deg=(0.0,),
+            randomize_frigate_initial_position=False,
             success_distance_nm=10.0,
             weather_history_frames=2,
         ),
@@ -168,6 +175,51 @@ class AlgorithmTests(unittest.TestCase):
         ]
         self.assertEqual(len(completed_lines), 3)
 
+    def test_periodic_hard_evaluation_saves_best_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / "ppo.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "algorithm": "masked_ppo",
+                        "learning_rate": 0.0001,
+                        "discount_factor": 0.99,
+                        "gae_lambda": 0.95,
+                        "clip_range": 0.2,
+                        "entropy_coefficient": 0.01,
+                        "value_coefficient": 0.5,
+                        "rollout_steps": 2,
+                        "batch_size": 2,
+                        "update_epochs": 1,
+                        "evaluation_interval_episodes": 1,
+                        "evaluation_minimum_route_conflicts": 2,
+                        "evaluation_seeds": [10001],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            checkpoint = root / "ppo.pt"
+            _, metrics = train_ppo(
+                ReturnEnv(),
+                episodes=1,
+                max_steps_per_episode=1,
+                config_path=config_path,
+                checkpoint_path=checkpoint,
+                log_dir=root / "logs",
+                seed=3,
+                num_envs=1,
+                device="cpu",
+                show_progress=False,
+            )
+
+            self.assertEqual(metrics["evaluation_runs"], 1.0)
+            self.assertEqual(metrics["evaluation_scenario_count"], 1.0)
+            self.assertTrue(checkpoint.is_file())
+            self.assertTrue((root / "ppo.best.pt").is_file())
+            manifest = json.loads((root / "logs/evaluation_scenarios.json").read_text())
+            self.assertGreaterEqual(manifest[0]["route_conflict_regions"], 2)
+
     def test_hard_seed_replay_is_deterministic(self) -> None:
         first = [_episode_seed(index, 10, (1, 4, 6), 1.0) for index in range(6)]
         second = [_episode_seed(index, 10, (1, 4, 6), 1.0) for index in range(6)]
@@ -175,24 +227,50 @@ class AlgorithmTests(unittest.TestCase):
         self.assertTrue(all(replayed for _, replayed in first))
         self.assertTrue(all(seed in {1, 4, 6} for seed, _ in first))
 
+    def test_dynamic_scenario_quota_guarantees_conflict_coverage(self) -> None:
+        requirements = [
+            _route_conflict_requirement(index, 0.6, 0.2) for index in range(3_250)
+        ]
+        self.assertGreaterEqual(sum(value >= 1 for value in requirements) / 3_250, 0.6)
+        self.assertGreaterEqual(sum(value >= 2 for value in requirements) / 3_250, 0.2)
+
     def test_parallel_episode_metrics_are_flushed_in_episode_order(self) -> None:
         writer = _RecordingWriter()
+
+        def metric(reward: float, steps: int, outcome: str, stage: int) -> _EpisodeMetric:
+            return _EpisodeMetric(
+                reward=reward,
+                steps=steps,
+                outcome=outcome,
+                curriculum_stage=stage,
+                route_conflict_regions=2,
+                required_route_conflicts=2,
+                minimum_storm_clearance_nm=0.5,
+                wait_steps=1,
+                heading_change_steps=2,
+                avoidance_decision_steps=3,
+                blocked_flight_actions=4,
+                hard_seed_pool_size=5,
+                episode_seed=6,
+                hard_seed_replay=False,
+            )
+
         pending = {
-            2: (12.0, 30, True, 1),
-            0: (-5.0, 20, False, 0),
+            2: metric(12.0, 30, "success", 1),
+            0: metric(-5.0, 20, "storm_collision", 0),
         }
         next_episode = _flush_ordered_episode_metrics(writer, pending, 0)  # type: ignore[arg-type]
         self.assertEqual(next_episode, 1)
         self.assertEqual({call[2] for call in writer.calls}, {0})
 
-        pending[1] = (3.0, 25, True, 0)
+        pending[1] = metric(3.0, 25, "success", 0)
         next_episode = _flush_ordered_episode_metrics(  # type: ignore[arg-type]
             writer, pending, next_episode
         )
         self.assertEqual(next_episode, 3)
         self.assertEqual(
             [call[2] for call in writer.calls],
-            [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2],
+            [0] * 16 + [1] * 16 + [2] * 16,
         )
         self.assertFalse(pending)
 

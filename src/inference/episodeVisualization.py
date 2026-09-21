@@ -57,6 +57,7 @@ def run_episode_trace(
     seed: int,
     max_steps: int | None = None,
     frame_stride: int = 10,
+    reset_options: dict[str, Any] | None = None,
 ) -> EpisodeTrace:
     """Run one deterministic episode and retain snapshots for visualization."""
     if max_steps is not None and max_steps <= 0:
@@ -64,7 +65,7 @@ def run_episode_trace(
     if frame_stride <= 0:
         raise ValueError("frame_stride must be positive")
 
-    observation, _ = env.reset(seed=seed)
+    observation, _ = env.reset(seed=seed, options=reset_options)
     helicopter_path = [(env.helicopter.x_nm, env.helicopter.y_nm)]
     frigate_path = [(env.frigate.x_nm, env.frigate.y_nm)]
     frames = [

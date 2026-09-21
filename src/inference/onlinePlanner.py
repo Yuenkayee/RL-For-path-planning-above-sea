@@ -23,8 +23,9 @@ def run_policy_episode(
     *,
     seed: int | None = None,
     max_steps: int | None = None,
+    reset_options: dict[str, Any] | None = None,
 ) -> EpisodeResult:
-    observation, _ = env.reset(seed=seed)
+    observation, _ = env.reset(seed=seed, options=reset_options)
     total_reward = 0.0
     path = [(env.helicopter.x_nm, env.helicopter.y_nm)]
     steps = 0
