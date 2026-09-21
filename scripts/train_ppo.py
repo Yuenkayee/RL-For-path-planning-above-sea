@@ -22,7 +22,7 @@ def main() -> None:
     parser.add_argument(
         "--num-envs",
         type=int,
-        default=4,
+        default=16,
         help="number of environments sampled in parallel",
     )
     parser.add_argument(

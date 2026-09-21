@@ -93,14 +93,14 @@ Ubuntu 22.04训练服务器可以直接配置已有的 Python 3.11–3.13 环境
 若已激活 Conda 或其他环境，可执行
 `./shell/check_training_server.sh --python "$(command -v python)" --require-cuda`。仅检查而不安装任何内容时加 `--check-only`。
 
-PPO默认并行运行4个环境，自动选择CUDA、Apple MPS或CPU，并每100步输出各episode进度：
+PPO默认并行运行16个环境，自动选择CUDA、Apple MPS或CPU，并每100步输出各episode进度：
 
 ```bash
-python scripts/train_ppo.py --episodes 5000 --max-steps 1200 --num-envs 8 --device auto
+python scripts/train_ppo.py --episodes 5000 --max-steps 1200 --num-envs 16 --device auto
 ```
 
 也可以在已激活的服务器 Python 环境中直接使用启动脚本。脚本默认训练
-5000 个 episode、8 个并行环境，同时保存终端输出、TensorBoard 日志和模型检查点：
+5000 个 episode、16 个并行环境，同时保存终端输出、TensorBoard 日志和模型检查点：
 
 ```bash
 ./shell/start_ppo_training.sh
@@ -114,7 +114,7 @@ nohup ./shell/start_ppo_training.sh > build/logs/ppo_residual/nohup.log 2>&1 &
 ```
 
 可通过环境变量修改默认参数，例如
-`NUM_ENVS=4 DEVICE=cuda ./shell/start_ppo_training.sh`。命令行追加参数也会传给
+`NUM_ENVS=20 DEVICE=cuda ./shell/start_ppo_training.sh`。命令行追加参数也会传给
 `scripts/train_ppo.py`，例如 `./shell/start_ppo_training.sh --quiet`。
 
 启动脚本默认将模型保存为 `build/checkpoints/ppo_residual.pt`，TensorBoard 和终端
