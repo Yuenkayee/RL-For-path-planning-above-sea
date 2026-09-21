@@ -62,6 +62,7 @@ class WeatherAndEnvironmentTests(unittest.TestCase):
         self.assertEqual(config.horizon_steps, 90)
         self.assertEqual(config.replanning_interval_seconds, 12.0)
         self.assertEqual(config.lookahead_distance_nm, 3.0)
+        self.assertEqual(config.maximum_expanded_states, 50_000)
 
     def test_rendezvous_uses_one_nautical_mile_distance_not_grid_alignment(self) -> None:
         weather_map = WeatherMap(area_size_nm=(10.0, 10.0), local_origin_nm=(0.0, 0.0))

@@ -22,6 +22,7 @@ class PlannerConfig:
     planning_step_seconds: float = 60.0
     replanning_interval_seconds: float = 12.0
     lookahead_distance_nm: float = 3.0
+    maximum_expanded_states: int = 50_000
     allow_wait: bool = True
     wait_speed_knots: float = 0.0
     flight_speed_knots: float = 100.0
@@ -39,6 +40,12 @@ class PlannerConfig:
             raise ValueError("planner time, distance and flight-speed values must be positive")
         if self.wait_speed_knots < 0 or not math.isfinite(self.wait_speed_knots):
             raise ValueError("planner wait speed must be finite and non-negative")
+        if (
+            isinstance(self.maximum_expanded_states, bool)
+            or not isinstance(self.maximum_expanded_states, int)
+            or self.maximum_expanded_states <= 0
+        ):
+            raise ValueError("maximum_expanded_states must be a positive integer")
         if self.weather_forecast_source != "constant_velocity_cells":
             raise ValueError("only constant_velocity_cells weather forecasts are supported")
 

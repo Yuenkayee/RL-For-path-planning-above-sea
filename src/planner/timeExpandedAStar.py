@@ -20,11 +20,23 @@ class TimeExpandedAStarPlanner:
         step_seconds: float = 60.0,
         helicopter_speed_knots: float = 50.0,
         allow_wait: bool = True,
+        goal_tolerance_nm: float = 1.0,
+        maximum_expanded_states: int = 50_000,
     ) -> None:
+        if not math.isfinite(goal_tolerance_nm) or goal_tolerance_nm <= 0.0:
+            raise ValueError("goal_tolerance_nm must be positive and finite")
+        if (
+            isinstance(maximum_expanded_states, bool)
+            or not isinstance(maximum_expanded_states, int)
+            or maximum_expanded_states <= 0
+        ):
+            raise ValueError("maximum_expanded_states must be a positive integer")
         self.horizon_steps = horizon_steps
         self.step_seconds = step_seconds
         self.helicopter_speed_knots = helicopter_speed_knots
         self.allow_wait = allow_wait
+        self.goal_tolerance_nm = goal_tolerance_nm
+        self.maximum_expanded_states = maximum_expanded_states
 
     @staticmethod
     def _grid_at(
@@ -56,14 +68,18 @@ class TimeExpandedAStarPlanner:
         if start_cell is None:
             return PlanResult((), False, 0, math.inf, "start outside map")
 
-        def target_at(step: int) -> tuple[int, int] | None:
+        def target_point_at(step: int) -> tuple[float, float]:
             hours = step * self.step_seconds / 3600.0
-            return cell(
-                (
-                    frigate_start_nm[0] + frigate_velocity_nm_per_hour[0] * hours,
-                    frigate_start_nm[1] + frigate_velocity_nm_per_hour[1] * hours,
-                )
+            return (
+                frigate_start_nm[0] + frigate_velocity_nm_per_hour[0] * hours,
+                frigate_start_nm[1] + frigate_velocity_nm_per_hour[1] * hours,
             )
+
+        def target_at(step: int) -> tuple[int, int] | None:
+            return cell(target_point_at(step))
+
+        def point_at(row: int, column: int) -> tuple[float, float]:
+            return (column + 0.5) * resolution, (row + 0.5) * resolution
 
         start_state = (start_cell[0], start_cell[1], 0)
         frontier = [(0.0, 0.0, start_state)]
@@ -71,6 +87,9 @@ class TimeExpandedAStarPlanner:
         cost_so_far = {start_state: 0.0}
         expanded = 0
         goal_state: tuple[int, int, int] | None = None
+        best_state = start_state
+        best_distance = math.dist(point_at(*start_cell), target_point_at(0))
+        failure_reason = "no goal in horizon"
 
         while frontier:
             _, current_cost, current = heapq.heappop(frontier)
@@ -78,8 +97,18 @@ class TimeExpandedAStarPlanner:
                 continue
             row, column, time_step = current
             expanded += 1
-            if target_at(time_step) == (row, column):
+            target_cell = target_at(time_step)
+            distance_to_target = math.dist(
+                point_at(row, column), target_point_at(time_step)
+            )
+            if target_cell is not None and distance_to_target < best_distance:
+                best_state = current
+                best_distance = distance_to_target
+            if target_cell is not None and distance_to_target <= self.goal_tolerance_nm:
                 goal_state = current
+                break
+            if expanded >= self.maximum_expanded_states:
+                failure_reason = "expansion limit reached"
                 break
             if time_step >= self.horizon_steps:
                 continue
@@ -123,10 +152,9 @@ class TimeExpandedAStarPlanner:
                 )
                 heapq.heappush(frontier, (new_cost + heuristic, new_cost, next_state))
 
-        if goal_state is None:
-            return PlanResult((), False, expanded, math.inf, "no goal in horizon")
+        terminal_state = goal_state or best_state
         states = []
-        cursor: tuple[int, int, int] | None = goal_state
+        cursor: tuple[int, int, int] | None = terminal_state
         while cursor is not None:
             states.append(cursor)
             cursor = came_from[cursor]
@@ -139,6 +167,14 @@ class TimeExpandedAStarPlanner:
             )
             for row, column, time_step in states
         )
+        if goal_state is None:
+            return PlanResult(
+                waypoints,
+                False,
+                expanded,
+                cost_so_far[terminal_state],
+                f"{failure_reason}; returning best-effort path",
+            )
         return PlanResult(waypoints, True, expanded, cost_so_far[goal_state])
 
 

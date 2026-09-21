@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 import unittest
 from pathlib import Path
@@ -60,6 +61,43 @@ class PlannerTests(unittest.TestCase):
         self.assertTrue(result.reached_goal)
         self.assertGreater(len(result.waypoints), 1)
         self.assertLess(result.waypoints[-1].time_step, 7)
+
+    def test_time_astar_uses_rendezvous_distance_tolerance(self) -> None:
+        snapshot = self.weather_map.snapshot()
+        frames = tuple(snapshot for _ in range(5))
+        result = TimeExpandedAStarPlanner(
+            horizon_steps=4,
+            goal_tolerance_nm=1.0,
+        ).plan(
+            frames,
+            (1.5, 1.5),
+            (2.4, 1.5),
+            (0.0, 0.0),
+        )
+        self.assertTrue(result.reached_goal)
+        self.assertEqual(len(result.waypoints), 1)
+
+    def test_time_astar_returns_marked_best_effort_path_at_expansion_limit(self) -> None:
+        snapshot = self.weather_map.snapshot()
+        frames = tuple(snapshot for _ in range(11))
+        result = TimeExpandedAStarPlanner(
+            horizon_steps=10,
+            goal_tolerance_nm=0.1,
+            maximum_expanded_states=5,
+        ).plan(
+            frames,
+            (0.5, 0.5),
+            (9.5, 9.5),
+            (0.0, 0.0),
+        )
+        self.assertFalse(result.reached_goal)
+        self.assertEqual(result.expanded_states, 5)
+        self.assertIn("expansion limit reached", result.reason)
+        self.assertGreater(len(result.waypoints), 1)
+        self.assertTrue(math.isfinite(result.cost))
+        start_distance = math.dist((0.5, 0.5), (9.5, 9.5))
+        final = result.waypoints[-1]
+        self.assertLess(math.dist((final.x_nm, final.y_nm), (9.5, 9.5)), start_distance)
 
 
 if __name__ == "__main__":

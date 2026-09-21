@@ -129,6 +129,8 @@ class ReturnEnv(gym.Env):
             step_seconds=self.planner_config.planning_step_seconds,
             helicopter_speed_knots=self.config.flight_speed_knots,
             allow_wait=self.planner_config.allow_wait,
+            goal_tolerance_nm=self.config.success_distance_nm,
+            maximum_expanded_states=self.planner_config.maximum_expanded_states,
         )
         self._guidance_plan = None
         self._guidance_grid: tuple[tuple[float, ...], ...] | None = None

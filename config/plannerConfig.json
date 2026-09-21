@@ -3,6 +3,7 @@
   "planning_step_seconds": 60.0,
   "replanning_interval_seconds": 12.0,
   "lookahead_distance_nm": 3.0,
+  "maximum_expanded_states": 50000,
   "allow_wait": true,
   "wait_speed_knots": 0.0,
   "flight_speed_knots": 100.0,
